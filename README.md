@@ -173,6 +173,12 @@ Mobile-first consumer flow: scan a referral link, claim tokens, share with frien
 7. The **redemption instruction** credits **Customer A**'s commission ledger
 8. The **Viral Oracle** recomputes the K-Factor with the new data point
 
+## Download
+
+**Android APK**: [Download from GitHub Releases](https://github.com/dantwoashim/viral-sync/releases/latest)
+
+Install on any Android device — enable "Install from unknown sources" in your settings, then open the APK.
+
 ## Live Demo
 
 - **Dashboard**: [https://viral-sync.vercel.app](https://viral-sync.vercel.app)
