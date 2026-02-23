@@ -1,100 +1,101 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
-import { Share2, ScanLine, Gift, Network, ArrowUpRight, Clock } from 'lucide-react';
+import { Share2, ScanLine, Gift, Network, ArrowUpRight, Clock, Coins } from 'lucide-react';
 import Link from 'next/link';
-
-const actions = [
-    { icon: Share2, label: 'Share', color: 'var(--accent)', bg: 'var(--accent-soft)', href: '/consumer/earn' },
-    { icon: ScanLine, label: 'Scan', color: 'var(--accent-2)', bg: 'var(--accent-2-soft)', href: '/consumer/scan' },
-    { icon: Gift, label: 'Redeem', color: 'var(--accent-3)', bg: 'var(--accent-3-soft)', href: '/consumer/scan' },
-    { icon: Network, label: 'Tree', color: 'var(--purple)', bg: 'var(--purple-soft)', href: '/consumer/profile' },
-];
-
-const activity = [
-    { id: '1', label: 'Earned from Hari\'s referral', amount: '+60', time: '5m ago', positive: true },
-    { id: '2', label: 'Redeemed at Bhat-Bhateni', amount: '-200', time: '2h ago', positive: false },
-    { id: '3', label: 'Shared to Sita K.', amount: '+30', time: '4h ago', positive: true },
-    { id: '4', label: 'Welcome bonus received', amount: '+100', time: '1d ago', positive: true },
-];
-
-const fade = (i: number) => ({
-    initial: { opacity: 0, y: 12 },
-    animate: { opacity: 1, y: 0, transition: { delay: i * 0.06, duration: 0.4 } },
-});
+import { useWallet } from '@/lib/useWallet';
+import { useCommissionLedger, useRecentTransactions } from '@/lib/hooks';
+import { formatTokenAmount, shortenAddress } from '@/lib/solana';
 
 export default function ConsumerPage() {
+    const publicKey = useWallet();
+    const ledger = useCommissionLedger(publicKey, null);
+    const txs = useRecentTransactions(publicKey, 4);
+
+    const totalEarned = ledger.data ? formatTokenAmount(ledger.data.totalEarned) : '0';
+    const claimed = ledger.data ? formatTokenAmount(ledger.data.totalClaimed) : '0';
+    const pending = ledger.data ? formatTokenAmount(ledger.data.claimable) : '0';
+
+    const actions = [
+        { icon: Share2, label: 'Share', color: 'var(--crimson)', bg: 'var(--crimson-soft)', href: '/consumer/earn' },
+        { icon: ScanLine, label: 'Scan', color: 'var(--jade)', bg: 'var(--jade-soft)', href: '/consumer/scan' },
+        { icon: Gift, label: 'Redeem', color: 'var(--gold)', bg: 'var(--gold-soft)', href: '/consumer/scan' },
+        { icon: Network, label: 'Tree', color: 'var(--cloud)', bg: 'var(--cloud-soft)', href: '/consumer/profile' },
+    ];
+
     return (
         <>
             <div className="page-top">
-                <h1>My Rewards</h1>
-                <div className="pill pill-accent">Level 3</div>
+                <h1>功 My Rewards</h1>
+                {publicKey && <div className="pill pill-gold">{shortenAddress(publicKey.toBase58())}</div>}
             </div>
 
             <div className="page-scroll">
                 {/* Hero */}
-                <motion.div {...fade(0)} className="consumer-hero">
+                <div className="consumer-hero">
                     <div className="total-label">Total Earned</div>
-                    <div className="total-amount">1,240.50</div>
+                    <div className="total-amount">{totalEarned}</div>
                     <div className="total-unit">tokens</div>
                     <div className="consumer-hero-stats">
                         <div className="consumer-hero-stat">
-                            <div className="ch-label">Claimable</div>
-                            <div className="ch-value">340.00</div>
+                            <div className="ch-label">Pending</div>
+                            <div className="ch-value">{pending}</div>
                         </div>
                         <div className="consumer-hero-stat">
                             <div className="ch-label">Claimed</div>
-                            <div className="ch-value">900.50</div>
-                        </div>
-                        <div className="consumer-hero-stat">
-                            <div className="ch-label">Redeemed</div>
-                            <div className="ch-value">12</div>
+                            <div className="ch-value">{claimed}</div>
                         </div>
                     </div>
-                </motion.div>
+                </div>
 
-                {/* Quick Actions */}
-                <motion.div {...fade(1)} className="section">
+                {/* Actions */}
+                <div className="section">
                     <div className="action-grid">
                         {actions.map((a) => (
                             <Link key={a.label} href={a.href} className="action-btn">
                                 <div className="action-btn-icon" style={{ background: a.bg, color: a.color }}>
-                                    <a.icon size={24} />
+                                    <a.icon size={22} />
                                 </div>
                                 <span>{a.label}</span>
                             </Link>
                         ))}
                     </div>
-                </motion.div>
+                </div>
 
                 {/* Activity */}
-                <motion.div {...fade(2)} className="section">
+                <div className="section">
                     <div className="section-header">
                         <span className="section-title">Recent Activity</span>
-                        <span className="section-action">See All</span>
                     </div>
-                    <div className="list-card">
-                        {activity.map((a) => (
-                            <div key={a.id} className="list-item">
-                                <div className="list-item-icon" style={{ background: a.positive ? 'var(--success-soft)' : 'var(--accent-soft)', color: a.positive ? 'var(--success)' : 'var(--accent)' }}>
-                                    {a.positive ? <ArrowUpRight size={18} /> : <Gift size={18} />}
-                                </div>
-                                <div className="list-item-content">
-                                    <div className="list-item-title">{a.label}</div>
-                                    <div className="list-item-sub"><Clock size={10} /> {a.time}</div>
-                                </div>
-                                <div className="list-item-right">
-                                    <div className="list-item-amount" style={{ color: a.positive ? 'var(--success)' : 'var(--text-secondary)' }}>
-                                        {a.amount}
+                    {txs.loading ? (
+                        <div><div className="loading-pulse" style={{ height: 50, marginBottom: 4 }} /><div className="loading-pulse" style={{ height: 50 }} /></div>
+                    ) : txs.data && txs.data.length > 0 ? (
+                        <div className="list-card">
+                            {txs.data.map((tx) => (
+                                <div key={tx.signature} className="list-item">
+                                    <div className="list-item-icon" style={{ background: 'var(--jade-soft)', color: 'var(--jade)' }}>
+                                        <ArrowUpRight size={16} />
+                                    </div>
+                                    <div className="list-item-content">
+                                        <div className="list-item-title">{tx.type}</div>
+                                        <div className="list-item-sub"><Clock size={9} /> {new Date((tx.timestamp ?? 0) * 1000).toLocaleTimeString()}</div>
+                                    </div>
+                                    <div className="list-item-right">
+                                        <div className="list-item-amount">{tx.amount ? formatTokenAmount(tx.amount) : '—'}</div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
-                    </div>
-                </motion.div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="empty-state">
+                            <div className="empty-state-icon"><Coins size={24} color="var(--text-3)" /></div>
+                            <h3>Your Journey Begins</h3>
+                            <p>Share your referral link to start earning tokens.</p>
+                        </div>
+                    )}
+                </div>
 
-                <div style={{ height: 'var(--space-8)' }} />
+                <div style={{ height: 'var(--s8)' }} />
             </div>
         </>
     );

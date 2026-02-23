@@ -1,78 +1,59 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
-import { User, Coins, TrendingUp, Shield, Network, Clock, ChevronRight } from 'lucide-react';
-
-const stats = [
-    { label: 'Tokens Held', value: '1,240.50', icon: Coins, color: 'var(--accent)' },
-    { label: 'Gen-1 Tokens', value: '820', icon: TrendingUp, color: 'var(--success)' },
-    { label: 'Gen-2 Tokens', value: '420.50', icon: Network, color: 'var(--purple)' },
-    { label: 'Referral Rank', value: '#12', icon: Shield, color: 'var(--accent-3)' },
-];
-
-const fade = (i: number) => ({
-    initial: { opacity: 0, y: 12 },
-    animate: { opacity: 1, y: 0, transition: { delay: i * 0.06, duration: 0.4 } },
-});
+import { User, Coins, TrendingUp, Shield } from 'lucide-react';
+import { useWallet } from '@/lib/useWallet';
+import { useCommissionLedger, useSolBalance } from '@/lib/hooks';
+import { formatTokenAmount, shortenAddress } from '@/lib/solana';
 
 export default function ProfilePage() {
+    const publicKey = useWallet();
+    const ledger = useCommissionLedger(publicKey, null);
+    const sol = useSolBalance(publicKey);
+
     return (
         <>
-            <div className="page-top">
-                <h1>Profile</h1>
-            </div>
+            <div className="page-top"><h1>人 Profile</h1></div>
 
             <div className="page-scroll">
                 {/* Avatar */}
-                <motion.div {...fade(0)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 'var(--space-6)' }}>
-                    <div style={{ width: 72, height: 72, borderRadius: 'var(--radius-full)', background: 'linear-gradient(135deg, var(--accent), var(--accent-3))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-3)' }}>
-                        <User size={32} color="white" />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 'var(--s6)' }}>
+                    <div style={{ width: 68, height: 68, borderRadius: 'var(--radius-full)', background: 'linear-gradient(135deg, var(--crimson), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--s3)' }}>
+                        <User size={28} color="white" />
                     </div>
-                    <div style={{ fontSize: 20, fontWeight: 700 }}>Prabin Ghimire</div>
-                    <div style={{ fontSize: 13, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>prab1n.sol</div>
-                    <div className="pill pill-accent" style={{ marginTop: 'var(--space-2)' }}>Level 3 · Active</div>
-                </motion.div>
+                    <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-serif)' }}>
+                        {publicKey ? shortenAddress(publicKey.toBase58()) : 'Not Connected'}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                        {publicKey ? publicKey.toBase58().substring(0, 20) + '...' : ''}
+                    </div>
+                </div>
 
                 {/* Stats */}
-                <motion.div {...fade(1)} className="stats-grid">
-                    {stats.map((s) => (
-                        <div key={s.label} className="stat-card glass">
-                            <div className="stat-icon" style={{ background: s.color + '18', color: s.color }}>
-                                <s.icon size={18} />
-                            </div>
-                            <div className="stat-label">{s.label}</div>
-                            <div className="stat-value">{s.value}</div>
-                        </div>
-                    ))}
-                </motion.div>
-
-                {/* Referral Tree */}
-                <motion.div {...fade(2)} className="section">
-                    <div className="section-header">
-                        <span className="section-title">Referral Tree</span>
+                <div className="stats-grid">
+                    <div className="stat-card scroll-card">
+                        <div className="stat-icon" style={{ background: 'var(--gold-soft)', color: 'var(--gold)' }}><Coins size={16} /></div>
+                        <div className="stat-label">Tokens Earned</div>
+                        <div className="stat-value">{ledger.data ? formatTokenAmount(ledger.data.totalEarned) : '—'}</div>
                     </div>
-                    <div className="glass" style={{ padding: 'var(--space-4)' }}>
-                        <div className="metric-row">
-                            <span className="metric-label">Direct Referrals</span>
-                            <span className="metric-value">12</span>
-                        </div>
-                        <div className="metric-row">
-                            <span className="metric-label">2nd Generation</span>
-                            <span className="metric-value">34</span>
-                        </div>
-                        <div className="metric-row">
-                            <span className="metric-label">Total Network</span>
-                            <span className="metric-value">47</span>
-                        </div>
-                        <div className="metric-row">
-                            <span className="metric-label">Deepest Chain</span>
-                            <span className="metric-value">3 gens</span>
-                        </div>
+                    <div className="stat-card scroll-card">
+                        <div className="stat-icon" style={{ background: 'var(--jade-soft)', color: 'var(--jade)' }}><TrendingUp size={16} /></div>
+                        <div className="stat-label">SOL Balance</div>
+                        <div className="stat-value">{sol.data !== null && sol.data !== undefined ? sol.data.toFixed(4) : '—'}</div>
                     </div>
-                </motion.div>
+                    <div className="stat-card scroll-card">
+                        <div className="stat-icon" style={{ background: 'var(--crimson-soft)', color: 'var(--crimson)' }}><Shield size={16} /></div>
+                        <div className="stat-label">Claimed</div>
+                        <div className="stat-value">{ledger.data ? formatTokenAmount(ledger.data.totalClaimed) : '—'}</div>
+                    </div>
+                    <div className="stat-card scroll-card">
+                        <div className="stat-icon" style={{ background: 'var(--cloud-soft)', color: 'var(--cloud)' }}><Coins size={16} /></div>
+                        <div className="stat-label">Pending</div>
+                        <div className="stat-value">{ledger.data ? formatTokenAmount(ledger.data.claimable) : '—'}</div>
+                    </div>
+                </div>
 
-                <div style={{ height: 'var(--space-8)' }} />
+                <div style={{ height: 'var(--s8)' }} />
             </div>
         </>
     );

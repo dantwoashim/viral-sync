@@ -1,114 +1,114 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
-import { Network, Users, TrendingUp, ArrowUpRight } from 'lucide-react';
-
-// ── Demo Network Data ──
-const topReferrers = [
-    { rank: 1, name: 'Hari B.', refs: 23, earned: '2,340', gen: 3 },
-    { rank: 2, name: 'Gita R.', refs: 18, earned: '1,890', gen: 2 },
-    { rank: 3, name: 'Aayush S.', refs: 15, earned: '1,450', gen: 3 },
-    { rank: 4, name: 'Sita K.', refs: 12, earned: '980', gen: 2 },
-    { rank: 5, name: 'Ram T.', refs: 9, earned: '720', gen: 1 },
-    { rank: 6, name: 'Bibek M.', refs: 7, earned: '540', gen: 2 },
-];
-
-const networkStats = [
-    { label: 'Total Users', value: '2,847' },
-    { label: 'Active Chains', value: '184' },
-    { label: 'Max Depth', value: '5 gens' },
-    { label: 'Avg Chain Length', value: '2.8' },
-];
-
-const fade = (i: number) => ({
-    initial: { opacity: 0, y: 12 },
-    animate: { opacity: 1, y: 0, transition: { delay: i * 0.06, duration: 0.4 } },
-});
-
-const rankColors = ['var(--accent-3)', 'var(--text-secondary)', 'var(--accent)'];
+import { Network, Users, TrendingUp } from 'lucide-react';
+import { useNetworkGraph, useMerchantConfig } from '@/lib/hooks';
+import { useWallet } from '@/lib/useWallet';
+import { formatTokenAmount } from '@/lib/solana';
 
 export default function NetworkPage() {
+    const publicKey = useWallet();
+    const config = useMerchantConfig(publicKey);
+    const graph = useNetworkGraph(config.data?.mint ?? null);
+
+    const nodes = graph.data?.nodes ?? [];
+    const edges = graph.data?.edges ?? [];
+
+    // Sort nodes by total lifetime tokens (best referrers first)
+    const sortedNodes = [...nodes].sort((a, b) => b.totalLifetime - a.totalLifetime);
+
     return (
         <>
             <div className="page-top">
-                <h1>Network</h1>
-                <div className="pill pill-accent"><Users size={12} /> 2,847</div>
+                <h1>络 Network</h1>
+                {nodes.length > 0 && <div className="pill pill-gold"><Users size={12} /> {nodes.length}</div>}
             </div>
 
             <div className="page-scroll">
                 {/* Stats */}
-                <motion.div {...fade(0)} className="stats-grid" style={{ marginBottom: 'var(--space-4)' }}>
-                    {networkStats.map((s) => (
-                        <div key={s.label} className="stat-card glass">
-                            <div className="stat-label">{s.label}</div>
-                            <div className="stat-value">{s.value}</div>
+                <div className="stats-grid" style={{ marginBottom: 'var(--s4)' }}>
+                    <div className="stat-card scroll-card">
+                        <div className="stat-label">Nodes</div>
+                        <div className="stat-value">{graph.loading ? '...' : nodes.length}</div>
+                    </div>
+                    <div className="stat-card scroll-card">
+                        <div className="stat-label">Edges</div>
+                        <div className="stat-value">{graph.loading ? '...' : edges.length}</div>
+                    </div>
+                    <div className="stat-card scroll-card">
+                        <div className="stat-label">Avg Refs</div>
+                        <div className="stat-value">{nodes.length > 0 ? (nodes.reduce((s, n) => s + n.referrerCount, 0) / nodes.length).toFixed(1) : '—'}</div>
+                    </div>
+                    <div className="stat-card scroll-card">
+                        <div className="stat-label">Total Flow</div>
+                        <div className="stat-value">{edges.length > 0 ? formatTokenAmount(edges.reduce((s, e) => s + e.tokensAttributed, 0)) : '—'}</div>
+                    </div>
+                </div>
+
+                {/* Token Distribution */}
+                {nodes.length > 0 && (
+                    <div className="scroll-card" style={{ padding: 'var(--s5)', marginBottom: 'var(--s4)' }}>
+                        <h3 style={{ marginBottom: 'var(--s3)' }}>
+                            <Network size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+                            Token Distribution
+                        </h3>
+                        <div className="metric-row">
+                            <span className="metric-label">Total Gen-1 Tokens</span>
+                            <span className="metric-value">{formatTokenAmount(nodes.reduce((s, n) => s + n.gen1Balance, 0))}</span>
                         </div>
-                    ))}
-                </motion.div>
-
-                {/* Network Visual */}
-                <motion.div {...fade(1)} className="glass" style={{ padding: 'var(--space-5)', marginBottom: 'var(--space-4)' }}>
-                    <h3 style={{ marginBottom: 'var(--space-3)' }}>
-                        <Network size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
-                        Referral Depth
-                    </h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                        {[
-                            { gen: 'Gen 1 (Direct)', count: 847, pct: 100 },
-                            { gen: 'Gen 2', count: 1240, pct: 73 },
-                            { gen: 'Gen 3', count: 520, pct: 43 },
-                            { gen: 'Gen 4', count: 180, pct: 21 },
-                            { gen: 'Gen 5', count: 60, pct: 10 },
-                        ].map((g) => (
-                            <div key={g.gen}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                                    <span style={{ color: 'var(--text-secondary)' }}>{g.gen}</span>
-                                    <span className="text-mono" style={{ fontWeight: 600 }}>{g.count}</span>
-                                </div>
-                                <div className="progress">
-                                    <div className="progress-fill" style={{ width: `${g.pct}%`, background: `linear-gradient(90deg, var(--accent), var(--accent-3))` }} />
-                                </div>
-                            </div>
-                        ))}
+                        <div className="metric-row">
+                            <span className="metric-label">Total Gen-2 Tokens</span>
+                            <span className="metric-value">{formatTokenAmount(nodes.reduce((s, n) => s + n.gen2Balance, 0))}</span>
+                        </div>
+                        <div className="metric-row">
+                            <span className="metric-label">Dead / Expired</span>
+                            <span className="metric-value">{formatTokenAmount(nodes.reduce((s, n) => s + n.deadBalance, 0))}</span>
+                        </div>
                     </div>
-                </motion.div>
+                )}
 
-                {/* Leaderboard */}
-                <motion.div {...fade(2)} className="section">
-                    <div className="section-header">
-                        <span className="section-title">
-                            <TrendingUp size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
-                            Top Referrers
-                        </span>
-                    </div>
-                    <div className="list-card">
-                        {topReferrers.map((r) => (
-                            <div key={r.rank} className="list-item">
-                                <div className="list-item-icon" style={{
-                                    background: r.rank <= 3 ? (rankColors[r.rank - 1] + '22') : 'var(--bg-glass)',
-                                    color: r.rank <= 3 ? rankColors[r.rank - 1] : 'var(--text-secondary)',
-                                    borderRadius: 'var(--radius-full)',
-                                    fontWeight: 800,
-                                    fontSize: 16,
-                                }}>
-                                    {r.rank}
-                                </div>
-                                <div className="list-item-content">
-                                    <div className="list-item-title">{r.name}</div>
-                                    <div className="list-item-sub">{r.refs} referrals · {r.gen} gen deep</div>
-                                </div>
-                                <div className="list-item-right">
-                                    <div className="list-item-amount" style={{ color: 'var(--success)' }}>
-                                        <ArrowUpRight size={12} /> {r.earned}
+                {/* Top Nodes */}
+                {sortedNodes.length > 0 && (
+                    <div className="section">
+                        <div className="section-header">
+                            <span className="section-title"><TrendingUp size={14} /> Top Nodes</span>
+                        </div>
+                        <div className="list-card">
+                            {sortedNodes.slice(0, 8).map((n, i) => (
+                                <div key={n.id} className="list-item">
+                                    <div className="list-item-icon" style={{
+                                        background: i < 3 ? 'var(--gold-soft)' : 'var(--mist)',
+                                        color: i < 3 ? 'var(--gold)' : 'var(--text-2)',
+                                        borderRadius: 'var(--radius-full)', fontWeight: 800, fontSize: 14,
+                                    }}>
+                                        {i + 1}
+                                    </div>
+                                    <div className="list-item-content">
+                                        <div className="list-item-title">{n.address.substring(0, 8)}...{n.address.slice(-4)}</div>
+                                        <div className="list-item-sub">
+                                            {n.referrerCount} refs · POI: {n.poiScore}
+                                        </div>
+                                    </div>
+                                    <div className="list-item-right">
+                                        <div className="list-item-amount" style={{ color: 'var(--jade)' }}>{formatTokenAmount(n.totalLifetime)}</div>
+                                        <div className="list-item-time">lifetime</div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
-                </motion.div>
+                )}
 
-                <div style={{ height: 'var(--space-8)' }} />
+                {/* Empty */}
+                {!graph.loading && nodes.length === 0 && (
+                    <div className="empty-state">
+                        <div className="empty-state-icon"><Network size={24} color="var(--text-3)" /></div>
+                        <h3>Network Forming</h3>
+                        <p>Once referrals flow on-chain, the network graph will visualize all connections.</p>
+                    </div>
+                )}
+
+                <div style={{ height: 'var(--s8)' }} />
             </div>
         </>
     );
