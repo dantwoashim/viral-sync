@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Zap, Store, Smartphone, CheckCircle, ArrowRight, LogIn } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
@@ -8,29 +8,46 @@ import { useRouter } from 'next/navigation';
 export default function LoginPage() {
     const { authenticated, login, setRole, role, loading } = useAuth();
     const router = useRouter();
+    const pendingRole = useRef<'merchant' | 'consumer' | null>(null);
 
-    // Auto-redirect if already authenticated + role selected
+    // When auth completes + we have a pending role → set it and redirect
     useEffect(() => {
-        if (authenticated && role) {
+        if (authenticated && pendingRole.current) {
+            const dest = pendingRole.current === 'merchant' ? '/' : '/consumer';
+            setRole(pendingRole.current);
+            pendingRole.current = null;
+            router.push(dest);
+        }
+    }, [authenticated, setRole, router]);
+
+    // If already authenticated + already has a role → redirect
+    useEffect(() => {
+        if (authenticated && role && !pendingRole.current) {
             router.replace(role === 'merchant' ? '/' : '/consumer');
         }
     }, [authenticated, role, router]);
 
     const handleMerchant = () => {
-        if (!authenticated) {
-            login(); // triggers Privy modal or demo modal
-            // After login, the user returns here → they click Merchant again → role is set
+        pendingRole.current = 'merchant';
+        if (authenticated) {
+            // Already logged in — just set role and go
+            setRole('merchant');
+            router.push('/');
+        } else {
+            // Open the login modal (Privy or demo). The useEffect above
+            // will fire once auth completes and redirect automatically.
+            login();
         }
-        setRole('merchant');
-        router.push('/');
     };
 
     const handleConsumer = () => {
-        if (!authenticated) {
+        pendingRole.current = 'consumer';
+        if (authenticated) {
+            setRole('consumer');
+            router.push('/consumer');
+        } else {
             login();
         }
-        setRole('consumer');
-        router.push('/consumer');
     };
 
     if (loading) {
