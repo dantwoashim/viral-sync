@@ -4,159 +4,136 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-    CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, Radar,
+    CartesianGrid,
 } from 'recharts';
-import { Zap, TrendingUp, Clock, Target, BarChart3, AlertTriangle } from 'lucide-react';
-import { useViralOracle, useMerchantConfig } from '@/lib/hooks';
-import { fixedToDecimal, bpsToPercent, formatTokenAmount } from '@/lib/solana';
-import { useWallet } from '@/lib/useWallet';
+import { Target, Clock, Zap, TrendingUp, BarChart3 } from 'lucide-react';
 
-const fadeUp = {
-    hidden: { opacity: 0, y: 16 },
-    visible: (i: number) => ({ opacity: 1, y: 0, transition: { delay: i * 0.08, duration: 0.35 } }),
-};
+// ── Demo Data ──
+const kFactor = 1.47;
+const funnelData = [
+    { stage: 'Shared', rate: 78 },
+    { stage: 'Claimed', rate: 45 },
+    { stage: 'Redeemed', rate: 23 },
+];
+
+const metrics = [
+    { label: 'Avg Share → Claim', value: '2.4h' },
+    { label: 'Avg Claim → Redeem', value: '18.6h' },
+    { label: 'Cost per Customer', value: '12.5 tokens' },
+    { label: 'vs Google Ads', value: '340% better' },
+    { label: 'Data Points', value: '4,291' },
+    { label: 'Last Computed', value: '2 min ago' },
+    { label: 'Median Refs/User', value: '3.2' },
+    { label: 'P90 Refs/User', value: '8.7' },
+    { label: 'Concentration Index', value: '0.23' },
+];
+
+const fade = (i: number) => ({
+    initial: { opacity: 0, y: 12 },
+    animate: { opacity: 1, y: 0, transition: { delay: i * 0.06, duration: 0.4 } },
+});
 
 export default function OraclePage() {
-    const wallet = useWallet();
-    const oracle = useViralOracle(wallet);
-    const config = useMerchantConfig(wallet);
-    const vo = oracle.data;
-    const mc = config.data;
-    const isLoading = oracle.loading;
-
-    // K-Factor display
-    const kFactor = vo ? fixedToDecimal(vo.kFactor) : 0;
-    const kLabel = kFactor >= 1.5 ? 'Super-Viral' : kFactor >= 1.0 ? 'Viral' : kFactor > 0 ? 'Sub-Viral' : '—';
-
-    // Funnel data
-    const funnelData = vo ? [
-        { stage: 'Shared', rate: fixedToDecimal(vo.shareRate) * 100, fillColor: 'var(--accent-primary)' },
-        { stage: 'Claimed', rate: fixedToDecimal(vo.claimRate) * 100, fillColor: 'var(--accent-secondary)' },
-        { stage: 'Redeemed', rate: fixedToDecimal(vo.firstRedeemRate) * 100, fillColor: 'var(--success)' },
-    ] : [
-        { stage: 'Shared', rate: 0 }, { stage: 'Claimed', rate: 0 }, { stage: 'Redeemed', rate: 0 },
-    ];
-
-    // Distribution radar
-    const distributionData = vo ? [
-        { metric: 'Median Refs', value: fixedToDecimal(vo.medianReferralsPerUser) },
-        { metric: 'P90 Refs', value: fixedToDecimal(vo.p90ReferralsPerUser) },
-        { metric: 'P10 Refs', value: fixedToDecimal(vo.p10ReferralsPerUser) },
-        { metric: 'Concentration', value: fixedToDecimal(vo.referralConcentrationIndex) },
-        { metric: 'Share→Claim (h)', value: vo.avgTimeShareToClaimSecs / 3600 },
-        { metric: 'Claim→Redeem (h)', value: vo.avgTimeClaimToRedeemSecs / 3600 },
-    ] : [];
-
-    // Efficiency comparison
-    const vsGoogle = vo ? fixedToDecimal(vo.vsGoogleAdsEfficiencyBps) : 0;
-    const commPerCustomer = vo ? formatTokenAmount(vo.commissionPerNewCustomerTokens) : '—';
-
     return (
-        <div className="page-content">
-            <div className="page-header">
-                <div>
-                    <h1>Viral Oracle</h1>
-                    <p>
-                        {vo
-                            ? `Last computed: ${new Date(vo.computedAt * 1000).toLocaleString()} · ${vo.dataPoints.toLocaleString()} data points`
-                            : 'Connect merchant to see oracle analytics'}
-                    </p>
-                </div>
-                {isLoading && <span className="badge badge-warning">Loading…</span>}
+        <>
+            <div className="page-top">
+                <h1>Viral Oracle</h1>
+                <div className="pill pill-success">● 4,291 pts</div>
             </div>
 
-            {/* K-Factor Hero */}
-            <motion.div className="chart-card" initial="hidden" animate="visible" custom={0} variants={fadeUp}
-                style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
-                <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)', marginBottom: 'var(--space-2)' }}>
-                    Viral Coefficient (K-Factor)
-                </div>
-                <div style={{ fontSize: 64, fontWeight: 800, fontFamily: 'var(--font-mono)', color: kFactor >= 1.0 ? 'var(--success-text)' : 'var(--warning-text)', letterSpacing: '-0.03em' }}>
-                    {kFactor > 0 ? kFactor.toFixed(2) : '—'}
-                </div>
-                <span className={`badge ${kFactor >= 1.0 ? 'badge-success' : 'badge-warning'}`} style={{ marginTop: 'var(--space-2)' }}>
-                    {kLabel}
-                </span>
-                <p style={{ marginTop: 'var(--space-3)', fontSize: 13, color: 'var(--text-secondary)', maxWidth: 400, margin: 'var(--space-3) auto 0' }}>
-                    {kFactor >= 1.0 ? 'Each referrer generates more than one new customer on average — exponential growth territory.' : 'Each referrer generates less than one new customer. Focus on improving claim and redeem rates.'}
-                </p>
-            </motion.div>
+            <div className="page-scroll">
+                {/* K-Factor Hero */}
+                <motion.div {...fade(0)} className="glass" style={{ marginBottom: 'var(--space-4)' }}>
+                    <div className="hero-stat">
+                        <div className="hero-stat-label">Viral Coefficient (K-Factor)</div>
+                        <div className="hero-stat-value glow-green">{kFactor.toFixed(2)}</div>
+                        <div style={{ marginTop: 'var(--space-3)' }}>
+                            <span className="pill pill-success">Super-Viral</span>
+                        </div>
+                        <div className="hero-stat-sub" style={{ maxWidth: 300, margin: 'var(--space-3) auto 0' }}>
+                            Each referrer generates 1.47 new customers on average — exponential growth territory.
+                        </div>
+                    </div>
+                </motion.div>
 
-            <div className="charts-row">
                 {/* Conversion Funnel */}
-                <motion.div className="chart-card" initial="hidden" animate="visible" custom={1} variants={fadeUp}>
-                    <h3><Target size={16} style={{ verticalAlign: '-3px', marginRight: 8 }} />Conversion Funnel</h3>
-                    <p className="chart-subtitle">Share → Claim → Redeem conversion rates</p>
-                    <div className="chart-container">
-                        <ResponsiveContainer width="100%" height={280}>
-                            <BarChart data={funnelData} barSize={50}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-secondary)" />
-                                <XAxis dataKey="stage" tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} />
-                                <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} unit="%" />
-                                <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: 8, fontSize: 13 }} />
+                <motion.div {...fade(1)}>
+                    <div className="chart-wrap glass">
+                        <h3><Target size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />Conversion Funnel</h3>
+                        <div className="chart-sub">Share → Claim → Redeem rates</div>
+
+                        <div className="funnel">
+                            <div className="funnel-row">
+                                <div className="funnel-label">Shared</div>
+                                <div className="funnel-bar-wrap">
+                                    <div className="funnel-bar" style={{ width: '78%', background: 'linear-gradient(90deg, var(--accent), #D4654A)' }}>
+                                        <span>78%</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="funnel-row">
+                                <div className="funnel-label">Claimed</div>
+                                <div className="funnel-bar-wrap">
+                                    <div className="funnel-bar" style={{ width: '45%', background: 'linear-gradient(90deg, var(--accent-2), #6B9E84)' }}>
+                                        <span>45%</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="funnel-row">
+                                <div className="funnel-label">Redeemed</div>
+                                <div className="funnel-bar-wrap">
+                                    <div className="funnel-bar" style={{ width: '23%', background: 'linear-gradient(90deg, var(--purple), #7C4FE0)' }}>
+                                        <span>23%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </motion.div>
+
+                {/* Recharts Bar */}
+                <motion.div {...fade(2)} className="section">
+                    <div className="chart-wrap glass">
+                        <h3><BarChart3 size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />Funnel Breakdown</h3>
+                        <div className="chart-sub">Percentage at each stage</div>
+                        <ResponsiveContainer width="100%" height={200}>
+                            <BarChart data={funnelData} barSize={36}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                                <XAxis dataKey="stage" tick={{ fill: 'rgba(245,245,247,0.5)', fontSize: 12 }} axisLine={false} tickLine={false} />
+                                <YAxis tick={{ fill: 'rgba(245,245,247,0.38)', fontSize: 11 }} axisLine={false} tickLine={false} unit="%" />
+                                <Tooltip contentStyle={{ background: 'rgba(18,18,28,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12 }} />
                                 <defs>
-                                    <linearGradient id="funnelGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="var(--accent-primary)" />
-                                        <stop offset="100%" stopColor="var(--accent-secondary)" />
+                                    <linearGradient id="oBarG" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor="var(--accent-2)" />
+                                        <stop offset="100%" stopColor="#4B8A6E" />
                                     </linearGradient>
                                 </defs>
-                                <Bar dataKey="rate" fill="url(#funnelGrad)" radius={[6, 6, 0, 0]} />
+                                <Bar dataKey="rate" fill="url(#oBarG)" radius={[8, 8, 0, 0]} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
                 </motion.div>
 
-                {/* Distribution Radar */}
-                <motion.div className="chart-card" initial="hidden" animate="visible" custom={2} variants={fadeUp}>
-                    <h3><BarChart3 size={16} style={{ verticalAlign: '-3px', marginRight: 8 }} />Distribution Profile</h3>
-                    <p className="chart-subtitle">Referral distribution and time-to-conversion</p>
-                    <div className="chart-container">
-                        {distributionData.length > 0 ? (
-                            <ResponsiveContainer width="100%" height={280}>
-                                <RadarChart data={distributionData}>
-                                    <PolarGrid stroke="var(--border-secondary)" />
-                                    <PolarAngleAxis dataKey="metric" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
-                                    <Radar dataKey="value" stroke="var(--accent-primary)" fill="var(--accent-primary)" fillOpacity={0.2} strokeWidth={2} />
-                                </RadarChart>
-                            </ResponsiveContainer>
-                        ) : (
-                            <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)', fontSize: 14 }}>
-                                No oracle data available
+                {/* Efficiency Metrics */}
+                <motion.div {...fade(3)} className="section">
+                    <div className="section-header">
+                        <span className="section-title">
+                            <Zap size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+                            Efficiency Metrics
+                        </span>
+                    </div>
+                    <div className="glass" style={{ padding: 'var(--space-4)' }}>
+                        {metrics.map((m) => (
+                            <div key={m.label} className="metric-row">
+                                <span className="metric-label">{m.label}</span>
+                                <span className="metric-value">{m.value}</span>
                             </div>
-                        )}
+                        ))}
                     </div>
                 </motion.div>
-            </div>
 
-            {/* Metrics Row */}
-            <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-                {[
-                    { label: 'Avg Share→Claim', value: vo ? `${(vo.avgTimeShareToClaimSecs / 3600).toFixed(1)}h` : '—', icon: Clock, color: 'var(--accent-primary)' },
-                    { label: 'Avg Claim→Redeem', value: vo ? `${(vo.avgTimeClaimToRedeemSecs / 3600).toFixed(1)}h` : '—', icon: Clock, color: 'var(--accent-secondary)' },
-                    { label: 'Cost per Customer', value: commPerCustomer, icon: Zap, color: 'var(--success)' },
-                    { label: 'vs Google Ads', value: vsGoogle > 0 ? `${vsGoogle.toFixed(0)}% efficient` : '—', icon: TrendingUp, color: vsGoogle > 100 ? 'var(--success)' : 'var(--warning)' },
-                ].map((m, i) => (
-                    <motion.div key={m.label} className="stat-card" custom={i + 3} initial="hidden" animate="visible" variants={fadeUp}>
-                        <div className="stat-card-header">
-                            <span className="stat-label">{m.label}</span>
-                            <div className="stat-icon" style={{ background: m.color + '18', color: m.color }}><m.icon size={16} /></div>
-                        </div>
-                        <div className="stat-value">{m.value}</div>
-                    </motion.div>
-                ))}
+                <div style={{ height: 'var(--space-8)' }} />
             </div>
-
-            {/* Token Config */}
-            {mc && (
-                <motion.div className="chart-card" initial="hidden" animate="visible" custom={7} variants={fadeUp}>
-                    <h3>Token Configuration</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)', padding: 'var(--space-4)' }}>
-                        <div><span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Tokens Issued</span><div className="text-mono" style={{ fontSize: 18, fontWeight: 700 }}>{formatTokenAmount(mc.tokensIssued)}</div></div>
-                        <div><span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Current Supply</span><div className="text-mono" style={{ fontSize: 18, fontWeight: 700 }}>{formatTokenAmount(mc.currentSupply)}</div></div>
-                        <div><span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Transfer Fee</span><div className="text-mono" style={{ fontSize: 18, fontWeight: 700 }}>{bpsToPercent(mc.transferFeeBps).toFixed(1)}%</div></div>
-                    </div>
-                </motion.div>
-            )}
-        </div>
+        </>
     );
 }
