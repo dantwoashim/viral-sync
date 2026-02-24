@@ -2,7 +2,8 @@
  * Viral Sync - Auth Provider
  *
  * Supports:
- * - Firebase Google auth (popup on desktop, redirect on mobile/native)
+ * - Native Google auth on Android/iOS via Capacitor Firebase Authentication
+ * - Firebase web auth (popup on desktop, redirect on mobile web)
  * - Demo auth fallback (no backend required)
  */
 
@@ -18,10 +19,15 @@ import {
     onAuthStateChanged,
     signInWithPopup,
     signInWithRedirect,
+    signInWithCredential,
     signOut,
     type Auth as FirebaseAuth,
     type User as FirebaseUser,
 } from 'firebase/auth';
+import {
+    FirebaseAuthentication,
+    type User as NativeFirebaseUser,
+} from '@capacitor-firebase/authentication';
 import { getFirebaseAuth } from './firebase';
 
 // Types
@@ -203,8 +209,28 @@ function detectLoginMethod(user: FirebaseUser): AuthState['loginMethod'] {
     return 'google';
 }
 
+function detectNativeLoginMethod(user: NativeFirebaseUser): AuthState['loginMethod'] {
+    const providerIds = [
+        user.providerId,
+        ...user.providerData.map((entry) => entry.providerId),
+    ].filter((providerId): providerId is string => Boolean(providerId));
+
+    if (providerIds.includes('apple.com')) {
+        return 'apple';
+    }
+    if (providerIds.includes('google.com')) {
+        return 'google';
+    }
+    if (providerIds.includes('password')) {
+        return 'email';
+    }
+    return 'google';
+}
+
 function humanizeAuthError(error: unknown): string {
     const code = (error as { code?: string })?.code || '';
+    const message = (error as { message?: string })?.message || '';
+    const normalizedMessage = message.toLowerCase();
 
     if (code.includes('popup-blocked')) {
         return 'Popup blocked. Allow popups or try redirect sign-in.';
@@ -227,8 +253,20 @@ function humanizeAuthError(error: unknown): string {
     if (code.includes('operation-not-allowed')) {
         return 'This sign-in provider is disabled in Firebase Auth.';
     }
+    if (code.includes('sign_in_canceled') || normalizedMessage.includes('cancel')) {
+        return 'Sign-in was cancelled.';
+    }
+    if (code.includes('developer_error') || normalizedMessage.includes('developer error')) {
+        return 'Google sign-in is misconfigured. Verify SHA fingerprints and OAuth client IDs in Firebase.';
+    }
+    if (normalizedMessage.includes('12500') || normalizedMessage.includes('12501') || normalizedMessage.includes('12502')) {
+        return 'Google sign-in failed. Verify Play Services and Firebase OAuth configuration.';
+    }
+    if (normalizedMessage.includes('10:')) {
+        return 'Google sign-in config mismatch. Re-download google-services.json after adding SHA fingerprints.';
+    }
 
-    return (error as { message?: string })?.message || 'Authentication failed. Please try again.';
+    return message || 'Authentication failed. Please try again.';
 }
 
 function applyFirebaseUserToState(
@@ -256,6 +294,56 @@ function applyFirebaseUserToState(
     });
 }
 
+function applyNativeUserToState(
+    user: NativeFirebaseUser,
+    role: UserRole,
+    setAuthenticated: (value: boolean) => void,
+    setWalletAddress: (value: PublicKey | null) => void,
+    setDisplayName: (value: string) => void,
+    setLoginMethod: (value: AuthState['loginMethod']) => void,
+): void {
+    const loginMethod = detectNativeLoginMethod(user);
+    const mappedWallet = deriveWalletFromStableId(`${loginMethod}:${user.uid}`);
+    const mappedName = user.displayName || user.email?.split('@')[0] || 'User';
+
+    setAuthenticated(true);
+    setWalletAddress(mappedWallet);
+    setDisplayName(mappedName);
+    setLoginMethod(loginMethod);
+
+    persistStoredSession({
+        walletAddress: mappedWallet.toBase58(),
+        displayName: mappedName,
+        loginMethod,
+        role,
+    });
+}
+
+function restoreStoredSessionOrSignOut(
+    setAuthenticated: (value: boolean) => void,
+    setWalletAddress: (value: PublicKey | null) => void,
+    setDisplayName: (value: string) => void,
+    setLoginMethod: (value: AuthState['loginMethod']) => void,
+    setRole: (value: UserRole) => void,
+): void {
+    const stored = readStoredSession();
+    if (stored.authenticated && stored.walletAddress && stored.loginMethod) {
+        setAuthenticated(true);
+        setWalletAddress(stored.walletAddress);
+        setDisplayName(stored.displayName);
+        setLoginMethod(stored.loginMethod);
+        setRole(stored.role);
+        return;
+    }
+
+    clearStoredSession();
+    setAuthenticated(false);
+    setWalletAddress(null);
+    setDisplayName('');
+    setLoginMethod(null);
+    setRole(readStoredRole());
+}
+
 const AuthContext = createContext<AuthState>(defaultAuth);
 export const useAuth = () => useContext(AuthContext);
 
@@ -275,17 +363,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!firebaseAuth) {
+            setLoading(false);
             return;
         }
 
         let mounted = true;
 
-        void getRedirectResult(firebaseAuth).catch((error) => {
-            if (mounted) {
-                setAuthError(humanizeAuthError(error));
-                setAuthBusy(false);
-            }
-        });
+        if (!Capacitor.isNativePlatform()) {
+            void getRedirectResult(firebaseAuth).catch((error) => {
+                if (mounted) {
+                    setAuthError(humanizeAuthError(error));
+                    setAuthBusy(false);
+                }
+            });
+        }
 
         const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
             if (!mounted) {
@@ -306,23 +397,67 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 );
                 setAuthError(null);
                 setShowModal(false);
-            } else {
-                const stored = readStoredSession();
-                if (stored.authenticated && stored.loginMethod === 'demo') {
-                    setAuthenticated(true);
-                    setWalletAddress(stored.walletAddress);
-                    setDisplayName(stored.displayName);
-                    setLoginMethod('demo');
-                    setRole(stored.role);
-                } else {
-                    clearStoredSession();
-                    setAuthenticated(false);
-                    setWalletAddress(null);
-                    setDisplayName('');
-                    setLoginMethod(null);
-                }
+                setLoading(false);
+                setAuthBusy(false);
+                return;
             }
 
+            if (Capacitor.isNativePlatform()) {
+                void FirebaseAuthentication.getCurrentUser()
+                    .then((result) => {
+                        if (!mounted) {
+                            return;
+                        }
+
+                        if (result.user) {
+                            applyNativeUserToState(
+                                result.user,
+                                roleFromStorage,
+                                setAuthenticated,
+                                setWalletAddress,
+                                setDisplayName,
+                                setLoginMethod,
+                            );
+                            setAuthError(null);
+                            setShowModal(false);
+                        } else {
+                            restoreStoredSessionOrSignOut(
+                                setAuthenticated,
+                                setWalletAddress,
+                                setDisplayName,
+                                setLoginMethod,
+                                setRole,
+                            );
+                        }
+
+                        setLoading(false);
+                        setAuthBusy(false);
+                    })
+                    .catch(() => {
+                        if (!mounted) {
+                            return;
+                        }
+
+                        restoreStoredSessionOrSignOut(
+                            setAuthenticated,
+                            setWalletAddress,
+                            setDisplayName,
+                            setLoginMethod,
+                            setRole,
+                        );
+                        setLoading(false);
+                        setAuthBusy(false);
+                    });
+                return;
+            }
+
+            restoreStoredSessionOrSignOut(
+                setAuthenticated,
+                setWalletAddress,
+                setDisplayName,
+                setLoginMethod,
+                setRole,
+            );
             setLoading(false);
             setAuthBusy(false);
         });
@@ -353,6 +488,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAuthError(null);
         setShowModal(false);
         setAuthBusy(true);
+
+        if (Capacitor.isNativePlatform()) {
+            try {
+                const nativeResult = await FirebaseAuthentication.signInWithGoogle();
+                const idToken = nativeResult.credential?.idToken;
+                const accessToken = nativeResult.credential?.accessToken;
+
+                if (idToken) {
+                    const credential = GoogleAuthProvider.credential(idToken, accessToken);
+                    await signInWithCredential(firebaseAuth, credential);
+                } else {
+                    throw new Error('Google sign-in returned no ID token.');
+                }
+
+                setAuthError(null);
+                setShowModal(false);
+                setAuthBusy(false);
+                return;
+            } catch (error) {
+                setAuthError(humanizeAuthError(error));
+                setAuthBusy(false);
+                setShowModal(true);
+                return;
+            }
+        }
 
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
@@ -397,6 +557,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const loginWithApple = useCallback(async () => {
         if (!firebaseAuth) {
             setAuthError('Apple sign-in is not configured. Add Firebase env vars first.');
+            return;
+        }
+        if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+            setAuthError('Apple sign-in is not available on Android. Use Google sign-in.');
             return;
         }
         if (authBusy) {
@@ -472,6 +636,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const logout = useCallback(() => {
         const doLogout = async () => {
+            if (Capacitor.isNativePlatform()) {
+                try {
+                    await FirebaseAuthentication.signOut();
+                } catch {
+                    // Ignore native sign-out failures and continue local cleanup.
+                }
+            }
+
             if (firebaseAuth?.currentUser) {
                 try {
                     await signOut(firebaseAuth);
@@ -556,6 +728,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     onApple={loginWithApple}
                     onDemo={loginWithDemo}
                     googleEnabled={Boolean(firebaseAuth)}
+                    appleEnabled={!Capacitor.isNativePlatform() || Capacitor.getPlatform() === 'ios'}
                     error={authError}
                     busy={authBusy}
                 />
@@ -570,6 +743,7 @@ function LoginModal({
     onApple,
     onDemo,
     googleEnabled,
+    appleEnabled,
     error,
     busy,
 }: {
@@ -578,6 +752,7 @@ function LoginModal({
     onApple: () => Promise<void>;
     onDemo: (name: string) => void;
     googleEnabled: boolean;
+    appleEnabled: boolean;
     error: string | null;
     busy: boolean;
 }) {
@@ -655,21 +830,23 @@ function LoginModal({
                         >
                             {busy ? 'Opening Sign-In...' : 'Continue with Google'}
                         </button>
-                        <button
-                            onClick={() => { void onApple(); }}
-                            disabled={busy}
-                            style={{
-                                width: '100%',
-                                padding: '12px 14px',
-                                borderRadius: 12,
-                                background: '#111111',
-                                color: '#ffffff',
-                                fontWeight: 700,
-                                opacity: busy ? 0.6 : 1,
-                            }}
-                        >
-                            {busy ? 'Opening Sign-In...' : 'Continue with Apple'}
-                        </button>
+                        {appleEnabled && (
+                            <button
+                                onClick={() => { void onApple(); }}
+                                disabled={busy}
+                                style={{
+                                    width: '100%',
+                                    padding: '12px 14px',
+                                    borderRadius: 12,
+                                    background: '#111111',
+                                    color: '#ffffff',
+                                    fontWeight: 700,
+                                    opacity: busy ? 0.6 : 1,
+                                }}
+                            >
+                                {busy ? 'Opening Sign-In...' : 'Continue with Apple'}
+                            </button>
+                        )}
                     </div>
                 ) : (
                     <div

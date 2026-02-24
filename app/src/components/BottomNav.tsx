@@ -26,11 +26,12 @@ export default function BottomNav() {
     const pathname = usePathname();
     const { role } = useAuth();
 
-    if (!role) {
+    if (pathname === '/login' || pathname.startsWith('/pos')) {
         return null;
     }
 
-    const tabs = role === 'consumer' ? consumerTabs : merchantTabs;
+    const activeRole = role ?? (pathname.startsWith('/consumer') ? 'consumer' : 'merchant');
+    const tabs = activeRole === 'consumer' ? consumerTabs : merchantTabs;
 
     const isActive = (href: string) => {
         if (href === '/' || href === '/consumer') return pathname === href;

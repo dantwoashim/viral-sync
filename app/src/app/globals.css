@@ -1269,20 +1269,20 @@ h3 {
 }
 
 @media (min-width: 769px) {
-  .bottom-nav {
-    display: none;
-  }
-
-  .mobile-shell {
-    padding-bottom: 0;
-  }
-
   .page-top {
     padding-top: calc(var(--safe-top) + var(--s4));
   }
 }
 
 @media (min-width: 1080px) {
+  .shell-layout.with-sidebar .bottom-nav {
+    display: none;
+  }
+
+  .shell-layout.with-sidebar .mobile-shell {
+    padding-bottom: 0;
+  }
+
   .shell-layout.with-sidebar {
     display: grid;
     grid-template-columns: var(--desktop-sidebar-w) minmax(0, 1fr);

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import BottomNav from '@/components/BottomNav';
 import Sidebar from '@/components/Sidebar';
@@ -8,10 +8,18 @@ import { useAuth } from '@/lib/auth';
 
 export default function MerchantShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
-    const { role } = useAuth();
+    const { role, setRole } = useAuth();
     const hideNav = pathname === '/login' || pathname.startsWith('/pos');
-    const showNavigation = !hideNav && role !== null;
-    const showSidebar = showNavigation && role === 'merchant';
+    const inferredRole = hideNav ? null : (pathname.startsWith('/consumer') ? 'consumer' : 'merchant');
+    const activeRole = role ?? inferredRole;
+    const showNavigation = !hideNav && activeRole !== null;
+    const showSidebar = showNavigation && activeRole === 'merchant';
+
+    useEffect(() => {
+        if (!role && inferredRole) {
+            setRole(inferredRole);
+        }
+    }, [role, inferredRole, setRole]);
 
     return (
         <div className={`shell-layout ${showSidebar ? 'with-sidebar' : ''}`}>
