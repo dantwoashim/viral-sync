@@ -13,6 +13,7 @@ import { Capacitor } from '@capacitor/core';
 import { PublicKey, Keypair } from '@solana/web3.js';
 import {
     GoogleAuthProvider,
+    OAuthProvider,
     getRedirectResult,
     onAuthStateChanged,
     signInWithPopup,
@@ -177,15 +178,29 @@ function deriveWalletFromStableId(stableId: string): PublicKey {
     return new PublicKey(bytes);
 }
 
-function pickGoogleAuthFlow(): GoogleAuthFlow {
+function pickOAuthFlow(): GoogleAuthFlow {
     if (typeof window === 'undefined') {
         return 'popup-first';
     }
     if (Capacitor.isNativePlatform()) {
-        return 'popup-first';
+        return 'redirect-first';
     }
     const ua = window.navigator.userAgent.toLowerCase();
     return /android|iphone|ipad|ipod/.test(ua) ? 'redirect-first' : 'popup-first';
+}
+
+function detectLoginMethod(user: FirebaseUser): AuthState['loginMethod'] {
+    const providerIds = user.providerData.map((entry) => entry.providerId);
+    if (providerIds.includes('apple.com')) {
+        return 'apple';
+    }
+    if (providerIds.includes('google.com')) {
+        return 'google';
+    }
+    if (providerIds.includes('password')) {
+        return 'email';
+    }
+    return 'google';
 }
 
 function humanizeAuthError(error: unknown): string {
@@ -210,7 +225,7 @@ function humanizeAuthError(error: unknown): string {
         return 'Network error while connecting to Google.';
     }
     if (code.includes('operation-not-allowed')) {
-        return 'Google provider is disabled in Firebase Auth.';
+        return 'This sign-in provider is disabled in Firebase Auth.';
     }
 
     return (error as { message?: string })?.message || 'Authentication failed. Please try again.';
@@ -224,18 +239,19 @@ function applyFirebaseUserToState(
     setDisplayName: (value: string) => void,
     setLoginMethod: (value: AuthState['loginMethod']) => void,
 ): void {
-    const mappedWallet = deriveWalletFromStableId(`google:${user.uid}`);
-    const mappedName = user.displayName || user.email?.split('@')[0] || 'Google User';
+    const loginMethod = detectLoginMethod(user);
+    const mappedWallet = deriveWalletFromStableId(`${loginMethod}:${user.uid}`);
+    const mappedName = user.displayName || user.email?.split('@')[0] || 'User';
 
     setAuthenticated(true);
     setWalletAddress(mappedWallet);
     setDisplayName(mappedName);
-    setLoginMethod('google');
+    setLoginMethod(loginMethod);
 
     persistStoredSession({
         walletAddress: mappedWallet.toBase58(),
         displayName: mappedName,
-        loginMethod: 'google',
+        loginMethod,
         role,
     });
 }
@@ -340,7 +356,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
-        const flow = pickGoogleAuthFlow();
+        const flow = pickOAuthFlow();
+
+        try {
+            if (flow === 'redirect-first') {
+                await signInWithRedirect(firebaseAuth, provider);
+                return;
+            }
+            await signInWithPopup(firebaseAuth, provider);
+        } catch (error) {
+            const code = (error as { code?: string })?.code || '';
+            const shouldFallbackToRedirect =
+                code.includes('popup') || code.includes('operation-not-supported');
+            const shouldFallbackToPopup =
+                code.includes('web-storage-unsupported') || code.includes('auth/argument-error');
+
+            if (flow === 'popup-first' && shouldFallbackToRedirect) {
+                try {
+                    await signInWithRedirect(firebaseAuth, provider);
+                    return;
+                } catch (redirectError) {
+                    setAuthError(humanizeAuthError(redirectError));
+                }
+            } else if (flow === 'redirect-first' && shouldFallbackToPopup) {
+                try {
+                    await signInWithPopup(firebaseAuth, provider);
+                    return;
+                } catch (popupError) {
+                    setAuthError(humanizeAuthError(popupError));
+                }
+            } else {
+                setAuthError(humanizeAuthError(error));
+            }
+
+            setAuthBusy(false);
+            setShowModal(true);
+        }
+    }, [firebaseAuth, authBusy]);
+
+    const loginWithApple = useCallback(async () => {
+        if (!firebaseAuth) {
+            setAuthError('Apple sign-in is not configured. Add Firebase env vars first.');
+            return;
+        }
+        if (authBusy) {
+            return;
+        }
+
+        setAuthError(null);
+        setShowModal(false);
+        setAuthBusy(true);
+
+        const provider = new OAuthProvider('apple.com');
+        provider.addScope('email');
+        provider.addScope('name');
+        const flow = pickOAuthFlow();
 
         try {
             if (flow === 'redirect-first') {
@@ -483,6 +553,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 <LoginModal
                     onClose={() => setShowModal(false)}
                     onGoogle={loginWithGoogle}
+                    onApple={loginWithApple}
                     onDemo={loginWithDemo}
                     googleEnabled={Boolean(firebaseAuth)}
                     error={authError}
@@ -496,6 +567,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 function LoginModal({
     onClose,
     onGoogle,
+    onApple,
     onDemo,
     googleEnabled,
     error,
@@ -503,6 +575,7 @@ function LoginModal({
 }: {
     onClose: () => void;
     onGoogle: () => Promise<void>;
+    onApple: () => Promise<void>;
     onDemo: (name: string) => void;
     googleEnabled: boolean;
     error: string | null;
@@ -566,22 +639,38 @@ function LoginModal({
                 </div>
 
                 {googleEnabled ? (
-                    <button
-                        onClick={() => { void onGoogle(); }}
-                        disabled={busy}
-                        style={{
-                            width: '100%',
-                            padding: '12px 14px',
-                            borderRadius: 12,
-                            background: 'linear-gradient(135deg, #ffffff, #ececec)',
-                            color: '#222',
-                            fontWeight: 700,
-                            marginBottom: 14,
-                            opacity: busy ? 0.6 : 1,
-                        }}
-                    >
-                        {busy ? 'Opening Google Sign-In...' : 'Continue with Google'}
-                    </button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10, marginBottom: 14 }}>
+                        <button
+                            onClick={() => { void onGoogle(); }}
+                            disabled={busy}
+                            style={{
+                                width: '100%',
+                                padding: '12px 14px',
+                                borderRadius: 12,
+                                background: 'linear-gradient(135deg, #ffffff, #ececec)',
+                                color: '#222',
+                                fontWeight: 700,
+                                opacity: busy ? 0.6 : 1,
+                            }}
+                        >
+                            {busy ? 'Opening Sign-In...' : 'Continue with Google'}
+                        </button>
+                        <button
+                            onClick={() => { void onApple(); }}
+                            disabled={busy}
+                            style={{
+                                width: '100%',
+                                padding: '12px 14px',
+                                borderRadius: 12,
+                                background: '#111111',
+                                color: '#ffffff',
+                                fontWeight: 700,
+                                opacity: busy ? 0.6 : 1,
+                            }}
+                        >
+                            {busy ? 'Opening Sign-In...' : 'Continue with Apple'}
+                        </button>
+                    </div>
                 ) : (
                     <div
                         style={{
@@ -594,7 +683,7 @@ function LoginModal({
                             padding: '8px 10px',
                         }}
                     >
-                        Google sign-in is disabled until Firebase env vars are configured.
+                        OAuth sign-in is disabled until Firebase env vars are configured.
                     </div>
                 )}
 

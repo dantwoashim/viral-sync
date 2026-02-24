@@ -1,0 +1,39 @@
+{
+    "project_info": {
+        "project_number": "478819898215",
+        "project_id": "viral-sync-97e40",
+        "storage_bucket": "viral-sync-97e40.firebasestorage.app"
+    },
+    "client": [
+        {
+            "client_info": {
+                "mobilesdk_app_id": "1:478819898215:android:499e49df5da08fc216d5c2",
+                "android_client_info": {
+                    "package_name": "com.viralsync.app"
+                }
+            },
+            "oauth_client": [
+                {
+                    "client_id": "478819898215-nsug0m0isqg1a749vbu6ilc2uqmkqcur.apps.googleusercontent.com",
+                    "client_type": 3
+                }
+            ],
+            "api_key": [
+                {
+                    "current_key": "AIzaSyBMA5LioJmmQZ-snxNzb2Yhzc8MdxM7AEk"
+                }
+            ],
+            "services": {
+                "appinvite_service": {
+                    "other_platform_oauth_client": [
+                        {
+                            "client_id": "478819898215-nsug0m0isqg1a749vbu6ilc2uqmkqcur.apps.googleusercontent.com",
+                            "client_type": 3
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "configuration_version": "1"
+}
