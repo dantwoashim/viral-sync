@@ -44,7 +44,7 @@ setInterval(() => {
     }
 }, 30_000);
 
-/* ── Health Endpoint ── */
+// Health Endpoint
 
 app.get('/health', async (_req, res) => {
     try {
@@ -62,7 +62,7 @@ app.get('/health', async (_req, res) => {
     }
 });
 
-/* ── Relay Endpoint ── */
+// Relay Endpoint
 
 app.post('/relay', async (req, res) => {
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
@@ -119,7 +119,7 @@ app.post('/relay', async (req, res) => {
     }
 });
 
-/* ── Start Server ── */
+// Start Server
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {

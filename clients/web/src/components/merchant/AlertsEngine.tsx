@@ -13,8 +13,8 @@ interface AlertsEngineProps {
 }
 
 /**
- * Merchant Dashboard V1 Component.
- * Surfaces the severe engine tracking signals mapping to the MerchantReputation engine built in Week 3.
+ * Merchant dashboard alerting component.
+ * Surfaces severe risk signals from merchant reputation state.
  * Warns merchants explicitly when their neglect risks automated bond seizure (`resolve_expired_dispute` threshold).
  */
 export const AlertsEngine: React.FC<AlertsEngineProps> = ({ reputation, pendingDisputeCount }) => {

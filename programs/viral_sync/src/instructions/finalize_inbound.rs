@@ -4,7 +4,10 @@ use crate::errors::ViralSyncError;
 
 #[derive(Accounts)]
 pub struct FinalizeInbound<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = dest_generation.owner == dest.key() @ ViralSyncError::InvalidAuthority
+    )]
     pub dest_generation: Account<'info, TokenGeneration>,
     pub dest: Signer<'info>, // usually crank or the user themselves
 }
@@ -17,7 +20,7 @@ pub fn handler(ctx: Context<FinalizeInbound>) -> Result<()> {
     }
     
     // Process all pending entries
-    // For V4 MVP, we just clear them out. In full deployment, this would write/update ReferralRecord PDAs
+    // For the current MVP, we clear entries. Full deployment should write/update ReferralRecord PDAs.
     for i in 0..INBOUND_BUFFER_SIZE {
         let entry = &mut gen.inbound_buffer[i];
         if !entry.processed && entry.amount > 0 {

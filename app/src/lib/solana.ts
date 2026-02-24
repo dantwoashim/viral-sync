@@ -1,11 +1,11 @@
 /**
- * Viral Sync — Solana connection, program constants, and PDA derivation helpers.
+ * Solana connection, program constants, and PDA derivation helpers.
  * Mirrors the on-chain seed patterns from programs/viral_sync/src/
  */
 
 import { Connection, PublicKey } from '@solana/web3.js';
 
-/* ── Constants ── */
+// Constants
 
 export const RPC_URL =
     process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.devnet.solana.com';
@@ -21,7 +21,7 @@ export const MERCHANT_PUBKEY = process.env.NEXT_PUBLIC_MERCHANT_PUBKEY
 /** Polling interval for hooks (ms) */
 export const POLL_INTERVAL = 10_000;
 
-/* ── Connection (singleton) ── */
+// Connection (singleton)
 
 let _connection: Connection | null = null;
 
@@ -32,15 +32,15 @@ export function getConnection(): Connection {
     return _connection;
 }
 
-/* ── PDA Derivation ── */
+// PDA Derivation
 
 /**
  * Derive MerchantConfig PDA.
- * Seeds: "merchant_config", merchant.key()
+ * Seeds: merchant namespace + mint
  */
-export function findMerchantConfigPda(merchant: PublicKey): [PublicKey, number] {
+export function findMerchantConfigPda(mint: PublicKey): [PublicKey, number] {
     return PublicKey.findProgramAddressSync(
-        [Buffer.from('merchant_config'), merchant.toBuffer()],
+        [Buffer.from('merchant'), mint.toBuffer()],
         PROGRAM_ID
     );
 }
@@ -80,11 +80,11 @@ export function findMerchantBondPda(merchant: PublicKey): [PublicKey, number] {
 
 /**
  * Derive TokenGeneration PDA.
- * Seeds: "gen_v4", mint.key(), owner.key()
+ * Seeds: generation namespace + mint + owner
  */
 export function findTokenGenerationPda(mint: PublicKey, owner: PublicKey): [PublicKey, number] {
     return PublicKey.findProgramAddressSync(
-        [Buffer.from('gen_v4'), mint.toBuffer(), owner.toBuffer()],
+        [Buffer.from('gen'), mint.toBuffer(), owner.toBuffer()],
         PROGRAM_ID
     );
 }
@@ -113,11 +113,11 @@ export function findDisputeRecordPda(merchant: PublicKey, referral: PublicKey): 
 
 /**
  * Derive VaultEntry PDA.
- * Seeds: "vault", merchant.key(), vault.key()
+ * Seeds: "vault_entry", mint.key(), vault_owner.key()
  */
-export function findVaultEntryPda(merchant: PublicKey, vault: PublicKey): [PublicKey, number] {
+export function findVaultEntryPda(mint: PublicKey, vaultOwner: PublicKey): [PublicKey, number] {
     return PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), merchant.toBuffer(), vault.toBuffer()],
+        [Buffer.from('vault_entry'), mint.toBuffer(), vaultOwner.toBuffer()],
         PROGRAM_ID
     );
 }
@@ -133,7 +133,7 @@ export function findGeoFencePda(vault: PublicKey): [PublicKey, number] {
     );
 }
 
-/* ── Utilities ── */
+// Utilities
 
 /** Shorten a pubkey for display: "7xKX...AsU" */
 export function shortenAddress(address: string, chars = 4): string {

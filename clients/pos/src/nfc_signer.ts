@@ -1,7 +1,7 @@
 import { Keypair } from '@solana/web3.js';
 import nacl from 'tweetnacl';
 
-// Core component of V4 Architecture's physical Point-of-Sale integration.
+// Core component of physical point-of-sale integration.
 // Prevents people from spoofing geo-locations by requiring a cryptographic
 // signature generated *locally* at the physical store server and piped into NFC.
 

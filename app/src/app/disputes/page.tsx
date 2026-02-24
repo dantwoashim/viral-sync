@@ -1,29 +1,38 @@
 'use client';
 
 import React from 'react';
-import { ShieldAlert, Clock, CheckCircle, AlertTriangle, Lock, ChevronRight } from 'lucide-react';
+import { ShieldAlert, Clock, CheckCircle, Lock } from 'lucide-react';
 import { useDisputeRecords, useMerchantReputation, useMerchantBond } from '@/lib/hooks';
 import { useWallet } from '@/lib/useWallet';
-import { lamportsToSol, shortenAddress } from '@/lib/solana';
+import { lamportsToSol } from '@/lib/solana';
 
 export default function DisputesPage() {
     const publicKey = useWallet();
     const disputes = useDisputeRecords(publicKey);
     const rep = useMerchantReputation(publicKey);
     const bond = useMerchantBond(publicKey);
+    const dataError = disputes.error || rep.error || bond.error;
 
     const bondAmount = bond.data ? lamportsToSol(bond.data.bondedLamports) : '—';
 
     return (
         <>
             <div className="page-top">
-                <h1>盾 Disputes</h1>
+                <h1>Disputes</h1>
                 {disputes.data && disputes.data.length > 0 && (
                     <div className="pill pill-gold">{disputes.data.length} total</div>
                 )}
             </div>
 
             <div className="page-scroll">
+                {dataError && (
+                    <div className="scroll-card" style={{ padding: 'var(--s4)', marginBottom: 'var(--s4)', borderColor: 'var(--crimson-soft)' }}>
+                        <div style={{ fontSize: 13, color: 'var(--crimson)' }}>
+                            Dispute data incomplete: {dataError}
+                        </div>
+                    </div>
+                )}
+
                 {/* Bond */}
                 <div className="scroll-card" style={{ padding: 'var(--s5)', marginBottom: 'var(--s4)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s3)', marginBottom: 'var(--s4)' }}>
@@ -60,8 +69,8 @@ export default function DisputesPage() {
                     ) : disputes.data && disputes.data.length > 0 ? (
                         <div className="list-card">
                             {disputes.data.map((d, i) => {
-                                const statusKey = Object.keys(d.status)[0] || 'pending';
-                                const isResolved = statusKey.toLowerCase().includes('resolved');
+                                const statusLabel = d.status;
+                                const isResolved = statusLabel !== 'Pending';
                                 const Icon = isResolved ? CheckCircle : Clock;
                                 return (
                                     <div key={i} className="list-item">
@@ -78,7 +87,7 @@ export default function DisputesPage() {
                                             </div>
                                         </div>
                                         <div className="list-item-right">
-                                            <span className={`pill ${isResolved ? 'pill-jade' : 'pill-gold'}`}>{statusKey}</span>
+                                            <span className={`pill ${isResolved ? 'pill-jade' : 'pill-gold'}`}>{statusLabel}</span>
                                         </div>
                                     </div>
                                 );

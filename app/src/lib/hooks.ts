@@ -1,23 +1,30 @@
 /**
- * Viral Sync — React hooks for fetching on-chain data.
+ * React hooks for fetching on-chain data.
  * Each hook returns { data, loading, error } and polls every POLL_INTERVAL ms.
  * When accounts don't exist on-chain (no merchant deployed), data stays null.
  */
 
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { PublicKey, ConfirmedSignatureInfo } from '@solana/web3.js';
+import { useState, useEffect } from 'react';
+import {
+    PublicKey,
+    ConfirmedSignatureInfo,
+    ParsedInstruction,
+    ParsedTransactionWithMeta,
+    PartiallyDecodedInstruction,
+    TokenBalance,
+} from '@solana/web3.js';
 import {
     getConnection,
     PROGRAM_ID,
     POLL_INTERVAL,
-    findMerchantConfigPda,
     findViralOraclePda,
     findMerchantReputationPda,
     findMerchantBondPda,
     findCommissionLedgerPda,
     findTokenGenerationPda,
+    MERCHANT_PUBKEY,
     shortenAddress,
 } from './solana';
 import type {
@@ -35,7 +42,7 @@ import type {
     NetworkEdge,
 } from './types';
 
-/* ── Generic Account Fetcher ── */
+// Generic Account Fetcher
 
 /**
  * Low-level function to fetch and decode an Anchor account.
@@ -57,63 +64,73 @@ async function fetchAccount<T>(
     }
 }
 
-/* ── Generic Hook ── */
+async function fetchMerchantConfigByMerchant(merchant: PublicKey): Promise<MerchantConfig | null> {
+    try {
+        const conn = getConnection();
+        const accounts = await conn.getProgramAccounts(PROGRAM_ID, {
+            filters: [{ memcmp: { offset: 9, bytes: merchant.toBase58() } }],
+        });
+
+        let best: MerchantConfig | null = null;
+        for (const { account } of accounts) {
+            const raw = Buffer.from(account.data);
+            if (raw.length < 9) continue;
+            const decoded = decodeMerchantConfig(Buffer.from(raw.slice(8)));
+            if (!best || decoded.tokensIssued > best.tokensIssued) best = decoded;
+        }
+        return best;
+    } catch {
+        return null;
+    }
+}
+
+// Generic Hook
 
 function useAccountData<T>(
-    pdaFn: () => [PublicKey, number] | null,
+    pda: PublicKey | null,
     decoder: (data: Buffer) => T,
     pollInterval = POLL_INTERVAL
 ): DataState<T> {
     const [state, setState] = useState<DataState<T>>({
         data: null,
-        loading: true,
+        loading: Boolean(pda),
         error: null,
     });
-    const mountedRef = useRef(true);
-
-    // Store pdaFn and decoder in refs so they don't trigger re-renders
-    // Callers pass inline arrow functions which are new on every render
-    const pdaFnRef = useRef(pdaFn);
-    const decoderRef = useRef(decoder);
-    pdaFnRef.current = pdaFn;
-    decoderRef.current = decoder;
-
-    // Derive a stable key from the PDA result for the useEffect dep
-    const pdaResult = pdaFn();
-    const pdaKey = pdaResult ? pdaResult[0].toBase58() : 'none';
+    const pdaKey = pda?.toBase58() ?? null;
 
     useEffect(() => {
-        mountedRef.current = true;
+        if (!pdaKey) {
+            return;
+        }
+
+        let mounted = true;
+        const targetPda = new PublicKey(pdaKey);
 
         const doFetch = async () => {
             try {
-                const result = pdaFnRef.current();
-                if (!result) {
-                    if (mountedRef.current) setState({ data: null, loading: false, error: null });
-                    return;
-                }
-                const [pda] = result;
-                const data = await fetchAccount<T>(pda, decoderRef.current);
-                if (mountedRef.current) setState({ data, loading: false, error: null });
+                const data = await fetchAccount<T>(targetPda, decoder);
+                if (mounted) setState({ data, loading: false, error: null });
             } catch (e: unknown) {
-                if (mountedRef.current) setState({ data: null, loading: false, error: (e as Error).message });
+                if (mounted) setState({ data: null, loading: false, error: (e as Error).message });
             }
         };
 
-        doFetch();
+        void doFetch();
         const interval = setInterval(doFetch, pollInterval);
         return () => {
-            mountedRef.current = false;
+            mounted = false;
             clearInterval(interval);
         };
-        // pdaKey changes when the underlying PDA changes (e.g. different merchant)
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pdaKey, pollInterval]);
+    }, [pdaKey, decoder, pollInterval]);
+
+    if (!pda) {
+        return { data: null, loading: false, error: null };
+    }
 
     return state;
 }
 
-/* ── Buffer Decoders (Borsh-compatible manual parsing) ── */
+// Buffer Decoders (Borsh-compatible manual parsing)
 // These read the raw account data after the 8-byte discriminator.
 // They match the field order in the Rust structs exactly.
 
@@ -250,32 +267,86 @@ function decodeCommissionLedger(buf: Buffer): CommissionLedger {
     };
 }
 
-/* ── Exported Hooks ── */
+function decodeTokenGeneration(buf: Buffer): TokenGeneration {
+    let o = 0;
+    const [bump, o1] = readU8(buf, o); o = o1;
+    const [version, o2] = readU8(buf, o); o = o2;
+    const [mint, o3] = readPubkey(buf, o); o = o3;
+    const [owner, o4] = readPubkey(buf, o); o = o4;
+    const [gen1Balance, o5] = readU64(buf, o); o = o5;
+    const [gen2Balance, o6] = readU64(buf, o); o = o6;
+    const [deadBalance, o7] = readU64(buf, o); o = o7;
+    const [totalLifetime] = readU64(buf, o);
+
+    return {
+        bump, version, mint, owner,
+        gen1Balance, gen2Balance, deadBalance, totalLifetime,
+        isIntermediary: false, originalSender: PublicKey.default,
+        inboundBuffer: [], bufferHead: 0, bufferPending: 0,
+        referrerSlots: [], activeReferrerSlots: 0,
+        firstReceivedAt: 0, lastReceivedAt: 0,
+        shareLimitDay: 0, sharesToday: 0,
+        processingNonce: 0, redemptionPending: false, redemptionSlot: 0,
+        isTreasury: false, isDexPool: false,
+        poiScore: 0, poiUpdatedAt: 0,
+    } as TokenGeneration;
+}
+
+// Exported Hooks
 
 export function useMerchantConfig(merchant: PublicKey | null): DataState<MerchantConfig> {
-    return useAccountData(
-        () => merchant ? findMerchantConfigPda(merchant) : null,
-        decodeMerchantConfig
-    );
+    const [state, setState] = useState<DataState<MerchantConfig>>({
+        data: null, loading: Boolean(merchant), error: null,
+    });
+
+    useEffect(() => {
+        if (!merchant) {
+            return;
+        }
+
+        let mounted = true;
+        const fetch = async () => {
+            try {
+                const data = await fetchMerchantConfigByMerchant(merchant);
+                if (mounted) setState({ data, loading: false, error: null });
+            } catch (e: unknown) {
+                if (mounted) setState({ data: null, loading: false, error: (e as Error).message });
+            }
+        };
+        fetch();
+        const interval = setInterval(() => {
+            void fetch();
+        }, POLL_INTERVAL);
+        return () => {
+            mounted = false;
+            clearInterval(interval);
+        };
+    }, [merchant]);
+
+    if (!merchant) {
+        return { data: null, loading: false, error: null };
+    }
+
+    return state;
 }
 
 export function useViralOracle(merchant: PublicKey | null): DataState<ViralOracle> {
     return useAccountData(
-        () => merchant ? findViralOraclePda(merchant) : null,
+        merchant ? findViralOraclePda(merchant)[0] : null,
         decodeViralOracle
     );
 }
 
 export function useMerchantReputation(merchant: PublicKey | null): DataState<MerchantReputation> {
     return useAccountData(
-        () => merchant ? findMerchantReputationPda(merchant) : null,
+        merchant ? findMerchantReputationPda(merchant)[0] : null,
         decodeMerchantReputation
     );
 }
 
 export function useMerchantBond(merchant: PublicKey | null): DataState<MerchantBond> {
     return useAccountData(
-        () => merchant ? findMerchantBondPda(merchant) : null,
+        merchant ? findMerchantBondPda(merchant)[0] : null,
         decodeMerchantBond
     );
 }
@@ -284,8 +355,9 @@ export function useCommissionLedger(
     referrer: PublicKey | null,
     merchant: PublicKey | null
 ): DataState<CommissionLedger> {
+    const effectiveMerchant = merchant ?? MERCHANT_PUBKEY;
     return useAccountData(
-        () => (referrer && merchant) ? findCommissionLedgerPda(referrer, merchant) : null,
+        (referrer && effectiveMerchant) ? findCommissionLedgerPda(referrer, effectiveMerchant)[0] : null,
         decodeCommissionLedger
     );
 }
@@ -294,49 +366,144 @@ export function useTokenGeneration(
     mint: PublicKey | null,
     owner: PublicKey | null
 ): DataState<TokenGeneration> {
-    // TokenGeneration decoding is complex due to arrays; simplified for key fields
     return useAccountData(
-        () => (mint && owner) ? findTokenGenerationPda(mint, owner) : null,
-        (buf) => {
-            let o = 0;
-            const [bump, o1] = readU8(buf, o); o = o1;
-            const [version, o2] = readU8(buf, o); o = o2;
-            const [mintPk, o3] = readPubkey(buf, o); o = o3;
-            const [owner, o4] = readPubkey(buf, o); o = o4;
-            const [gen1Balance, o5] = readU64(buf, o); o = o5;
-            const [gen2Balance, o6] = readU64(buf, o); o = o6;
-            const [deadBalance, o7] = readU64(buf, o); o = o7;
-            const [totalLifetime, o8] = readU64(buf, o); o = o8;
-            // Skip complex nested fields for now, return core balances
-            return {
-                bump, version, mint: mintPk, owner,
-                gen1Balance, gen2Balance, deadBalance, totalLifetime,
-                isIntermediary: false, originalSender: PublicKey.default,
-                inboundBuffer: [], bufferHead: 0, bufferPending: 0,
-                referrerSlots: [], activeReferrerSlots: 0,
-                firstReceivedAt: 0, lastReceivedAt: 0,
-                shareLimitDay: 0, sharesToday: 0,
-                processingNonce: 0, redemptionPending: false, redemptionSlot: 0,
-                isTreasury: false, isDexPool: false,
-                poiScore: 0, poiUpdatedAt: 0,
-            } as TokenGeneration;
-        }
+        (mint && owner) ? findTokenGenerationPda(mint, owner)[0] : null,
+        decodeTokenGeneration
     );
 }
 
-/* ── Transaction History Hook ── */
+// Transaction History Hook
+
+function parseRawTokenAmount(balance: TokenBalance): number {
+    const raw = balance.uiTokenAmount?.amount;
+    if (!raw) {
+        return 0;
+    }
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function inferTokenDeltaForOwner(
+    tx: ParsedTransactionWithMeta | null,
+    ownerAddress: string
+): number | undefined {
+    if (!tx?.meta) {
+        return undefined;
+    }
+
+    const pre = tx.meta.preTokenBalances ?? [];
+    const post = tx.meta.postTokenBalances ?? [];
+    const mints = new Set<string>();
+
+    pre.forEach((entry) => {
+        if (entry.owner === ownerAddress) {
+            mints.add(entry.mint);
+        }
+    });
+    post.forEach((entry) => {
+        if (entry.owner === ownerAddress) {
+            mints.add(entry.mint);
+        }
+    });
+
+    let bestDelta = 0;
+    for (const mint of mints) {
+        const preAmount = pre
+            .filter((entry) => entry.owner === ownerAddress && entry.mint === mint)
+            .reduce((sum, entry) => sum + parseRawTokenAmount(entry), 0);
+        const postAmount = post
+            .filter((entry) => entry.owner === ownerAddress && entry.mint === mint)
+            .reduce((sum, entry) => sum + parseRawTokenAmount(entry), 0);
+        const delta = postAmount - preAmount;
+        if (Math.abs(delta) > Math.abs(bestDelta)) {
+            bestDelta = delta;
+        }
+    }
+
+    if (bestDelta === 0) {
+        return undefined;
+    }
+    return Math.abs(bestDelta);
+}
+
+function inferInstructionHint(
+    instructions: (ParsedInstruction | PartiallyDecodedInstruction)[]
+): string {
+    return instructions
+        .map((ix) => {
+            if ('parsed' in ix && ix.parsed && typeof ix.parsed === 'object') {
+                const parsed = JSON.stringify(ix.parsed).toLowerCase();
+                if (parsed.includes('redeem')) return 'redeem';
+                if (parsed.includes('claim') || parsed.includes('commission')) return 'claim';
+                if (parsed.includes('share') || parsed.includes('referral')) return 'share';
+                if (parsed.includes('dispute')) return 'dispute';
+            }
+            if ('program' in ix && typeof ix.program === 'string') {
+                return ix.program.toLowerCase();
+            }
+            return ix.programId.toBase58().toLowerCase();
+        })
+        .join(' ');
+}
+
+function inferActivityType(
+    tx: ParsedTransactionWithMeta | null,
+    tokenAmount: number | undefined
+): ActivityItem['type'] {
+    const logs = (tx?.meta?.logMessages ?? []).join(' ').toLowerCase();
+    const instructionHint = tx
+        ? inferInstructionHint(tx.transaction.message.instructions)
+        : '';
+    const corpus = `${logs} ${instructionHint}`;
+
+    if (corpus.includes('dispute')) return 'dispute';
+    if (corpus.includes('redeem') || corpus.includes('redemption')) return 'redemption';
+    if (corpus.includes('share') || corpus.includes('referral')) return 'share';
+    if (corpus.includes('claim') || corpus.includes('commission')) return 'commission';
+
+    if (tokenAmount && tokenAmount > 0) {
+        return 'commission';
+    }
+    return 'unknown';
+}
+
+function buildActivityItem(args: {
+    signatureInfo: ConfirmedSignatureInfo;
+    tx: ParsedTransactionWithMeta | null;
+    ownerAddress: string;
+}): ActivityItem {
+    const amount = inferTokenDeltaForOwner(args.tx, args.ownerAddress);
+    const type = inferActivityType(args.tx, amount);
+
+    const label: Record<ActivityItem['type'], string> = {
+        commission: 'Commission claimed',
+        redemption: 'Redeem processed',
+        share: 'Referral share',
+        dispute: 'Dispute update',
+        unknown: 'On-chain transaction',
+    };
+
+    return {
+        signature: args.signatureInfo.signature,
+        slot: args.signatureInfo.slot,
+        timestamp: args.signatureInfo.blockTime ?? null,
+        type,
+        description: `${label[type]} ${shortenAddress(args.signatureInfo.signature, 6)}`,
+        amount,
+        success: args.signatureInfo.err === null,
+    };
+}
 
 export function useRecentTransactions(
     address: PublicKey | null,
     limit = 10
 ): DataState<ActivityItem[]> {
     const [state, setState] = useState<DataState<ActivityItem[]>>({
-        data: null, loading: true, error: null,
+        data: null, loading: Boolean(address), error: null,
     });
 
     useEffect(() => {
         if (!address) {
-            setState({ data: null, loading: false, error: null });
             return;
         }
         let mounted = true;
@@ -344,37 +511,49 @@ export function useRecentTransactions(
             try {
                 const conn = getConnection();
                 const sigs = await conn.getSignaturesForAddress(address, { limit });
-                const items: ActivityItem[] = sigs.map((sig: ConfirmedSignatureInfo) => ({
-                    signature: sig.signature,
-                    slot: sig.slot,
-                    timestamp: sig.blockTime ?? null,
-                    type: 'unknown' as const,
-                    description: `Transaction ${shortenAddress(sig.signature, 6)}`,
-                    success: sig.err === null,
+                if (sigs.length === 0) {
+                    if (mounted) setState({ data: [], loading: false, error: null });
+                    return;
+                }
+
+                const parsed = await conn.getParsedTransactions(
+                    sigs.map((sig) => sig.signature),
+                    { maxSupportedTransactionVersion: 0 }
+                );
+
+                const ownerAddress = address.toBase58();
+                const items: ActivityItem[] = sigs.map((sig, index) => buildActivityItem({
+                    signatureInfo: sig,
+                    tx: parsed[index] ?? null,
+                    ownerAddress,
                 }));
+
                 if (mounted) setState({ data: items, loading: false, error: null });
             } catch (e: unknown) {
                 if (mounted) setState({ data: null, loading: false, error: (e as Error).message });
             }
         };
-        fetch();
+        void fetch();
         const interval = setInterval(fetch, POLL_INTERVAL);
         return () => { mounted = false; clearInterval(interval); };
     }, [address, limit]);
 
+    if (!address) {
+        return { data: null, loading: false, error: null };
+    }
+
     return state;
 }
 
-/* ── Dispute Records Hook (uses getProgramAccounts filter) ── */
+// Dispute Records Hook (uses getProgramAccounts filter)
 
 export function useDisputeRecords(merchant: PublicKey | null): DataState<DisputeRecord[]> {
     const [state, setState] = useState<DataState<DisputeRecord[]>>({
-        data: null, loading: true, error: null,
+        data: null, loading: Boolean(merchant), error: null,
     });
 
     useEffect(() => {
         if (!merchant) {
-            setState({ data: null, loading: false, error: null });
             return;
         }
         let mounted = true;
@@ -384,7 +563,7 @@ export function useDisputeRecords(merchant: PublicKey | null): DataState<Dispute
                 // Filter by merchant pubkey at offset 9 (after 8-byte discriminator + 1 bump)
                 const accounts = await conn.getProgramAccounts(PROGRAM_ID, {
                     filters: [
-                        { dataSize: 138 }, // Approximate size of DisputeRecord
+                        { dataSize: 131 }, // 8 discriminator + 123 bytes borsh payload
                         { memcmp: { offset: 9, bytes: merchant.toBase58() } },
                     ],
                 });
@@ -422,19 +601,22 @@ export function useDisputeRecords(merchant: PublicKey | null): DataState<Dispute
         return () => { mounted = false; clearInterval(interval); };
     }, [merchant]);
 
+    if (!merchant) {
+        return { data: null, loading: false, error: null };
+    }
+
     return state;
 }
 
-/* ── Network Graph Hook (TokenGeneration accounts by mint) ── */
+// Network Graph Hook (TokenGeneration accounts by mint)
 
 export function useNetworkGraph(mint: PublicKey | null): DataState<{ nodes: NetworkNode[]; edges: NetworkEdge[] }> {
     const [state, setState] = useState<DataState<{ nodes: NetworkNode[]; edges: NetworkEdge[] }>>({
-        data: null, loading: true, error: null,
+        data: null, loading: Boolean(mint), error: null,
     });
 
     useEffect(() => {
         if (!mint) {
-            setState({ data: null, loading: false, error: null });
             return;
         }
         let mounted = true;
@@ -450,33 +632,94 @@ export function useNetworkGraph(mint: PublicKey | null): DataState<{ nodes: Netw
                 });
 
                 const nodes: NetworkNode[] = [];
-                const edges: NetworkEdge[] = [];
+                const edgeTotals = new Map<string, number>();
+                const INBOUND_ENTRY_SIZE = 57;
 
                 accounts.forEach(({ account }, i) => {
-                    const buf = Buffer.from(account.data.slice(8));
-                    let o = 0;
-                    const [, o1] = readU8(buf, o); o = o1; // bump
-                    const [, o2] = readU8(buf, o); o = o2; // version
-                    const [, o3] = readPubkey(buf, o); o = o3; // mint
-                    const [owner, o4] = readPubkey(buf, o); o = o4;
-                    const [gen1Balance, o5] = readU64(buf, o); o = o5;
-                    const [gen2Balance, o6] = readU64(buf, o); o = o6;
-                    const [deadBalance, o7] = readU64(buf, o); o = o7;
-                    const [totalLifetime] = readU64(buf, o);
+                    try {
+                        const buf = Buffer.from(account.data.slice(8));
+                        let o = 0;
+                        const [, o1] = readU8(buf, o); o = o1; // bump
+                        const [, o2] = readU8(buf, o); o = o2; // version
+                        const [, o3] = readPubkey(buf, o); o = o3; // mint
+                        const [owner, o4] = readPubkey(buf, o); o = o4;
+                        const [gen1Balance, o5] = readU64(buf, o); o = o5;
+                        const [gen2Balance, o6] = readU64(buf, o); o = o6;
+                        const [deadBalance, o7] = readU64(buf, o); o = o7;
+                        const [totalLifetime, o8] = readU64(buf, o); o = o8;
 
-                    const addr = owner.toBase58();
-                    const angle = (2 * Math.PI * i) / Math.max(accounts.length, 1);
-                    const radius = 200 + Math.random() * 100;
+                        const addr = owner.toBase58();
+                        const entropy = owner.toBytes().reduce((acc, b) => acc + b, 0);
+                        const angle = (2 * Math.PI * i) / Math.max(accounts.length, 1);
+                        const radius = 200 + (entropy % 100);
 
-                    nodes.push({
-                        id: addr,
-                        address: addr,
-                        gen1Balance, gen2Balance, deadBalance, totalLifetime,
-                        referrerCount: 0, // Would need deeper parsing
-                        poiScore: 0,
-                        x: 400 + radius * Math.cos(angle),
-                        y: 300 + radius * Math.sin(angle),
-                    });
+                        // Skip is_intermediary + original_sender
+                        const [, o9] = readBool(buf, o); o = o9;
+                        const [, o10] = readPubkey(buf, o); o = o10;
+
+                        // Skip 16 inbound ring-buffer entries.
+                        o += INBOUND_ENTRY_SIZE * 16;
+
+                        // buffer_head + buffer_pending
+                        const [, o11] = readU8(buf, o); o = o11;
+                        const [, o12] = readU8(buf, o); o = o12;
+
+                        let parsedReferrerCount = 0;
+                        for (let slot = 0; slot < 4; slot += 1) {
+                            const [referrer, o13] = readPubkey(buf, o); o = o13;
+                            const [, o14] = readPubkey(buf, o); o = o14; // referral_record
+                            const [tokensAttributed, o15] = readU64(buf, o); o = o15;
+                            const [, o16] = readU64(buf, o); o = o16; // tokens_redeemed_so_far
+                            const [isActive, o17] = readBool(buf, o); o = o17;
+
+                            if (!isActive || tokensAttributed <= 0) {
+                                continue;
+                            }
+
+                            parsedReferrerCount += 1;
+                            const from = referrer.toBase58();
+                            const key = `${from}->${addr}`;
+                            edgeTotals.set(key, (edgeTotals.get(key) || 0) + tokensAttributed);
+                        }
+
+                        const [activeReferrerSlots, o18] = readU8(buf, o); o = o18;
+                        const referrerCount = Math.max(parsedReferrerCount, activeReferrerSlots);
+
+                        // Skip to POI score.
+                        const [, o19] = readI64(buf, o); o = o19;
+                        const [, o20] = readI64(buf, o); o = o20;
+                        const [, o21] = readU64(buf, o); o = o21;
+                        const [, o22] = readU16(buf, o); o = o22;
+                        const [, o23] = readU64(buf, o); o = o23;
+                        const [, o24] = readBool(buf, o); o = o24;
+                        const [, o25] = readU64(buf, o); o = o25;
+                        const [, o26] = readU64(buf, o); o = o26;
+                        o += 8 * 4; // redemption_slot_consumed [u64;4]
+                        const [, o27] = readU8(buf, o); o = o27;
+                        const [, o28] = readBool(buf, o); o = o28;
+                        const [, o29] = readBool(buf, o); o = o29;
+                        const [poiScore] = readU32(buf, o);
+
+                        nodes.push({
+                            id: addr,
+                            address: addr,
+                            gen1Balance,
+                            gen2Balance,
+                            deadBalance,
+                            totalLifetime,
+                            referrerCount,
+                            poiScore,
+                            x: 400 + radius * Math.cos(angle),
+                            y: 300 + radius * Math.sin(angle),
+                        });
+                    } catch {
+                        // Ignore malformed rows and continue rendering remaining nodes.
+                    }
+                });
+
+                const edges: NetworkEdge[] = Array.from(edgeTotals.entries()).map(([key, tokensAttributed]) => {
+                    const [from, to] = key.split('->');
+                    return { from, to, tokensAttributed };
                 });
 
                 if (mounted) setState({ data: { nodes, edges }, loading: false, error: null });
@@ -489,19 +732,22 @@ export function useNetworkGraph(mint: PublicKey | null): DataState<{ nodes: Netw
         return () => { mounted = false; clearInterval(interval); };
     }, [mint]);
 
+    if (!mint) {
+        return { data: null, loading: false, error: null };
+    }
+
     return state;
 }
 
-/* ── SOL Balance Hook ── */
+// SOL Balance Hook
 
 export function useSolBalance(address: PublicKey | null): DataState<number> {
     const [state, setState] = useState<DataState<number>>({
-        data: null, loading: true, error: null,
+        data: null, loading: Boolean(address), error: null,
     });
 
     useEffect(() => {
         if (!address) {
-            setState({ data: null, loading: false, error: null });
             return;
         }
         let mounted = true;
@@ -518,6 +764,10 @@ export function useSolBalance(address: PublicKey | null): DataState<number> {
         const interval = setInterval(fetch, POLL_INTERVAL);
         return () => { mounted = false; clearInterval(interval); };
     }, [address]);
+
+    if (!address) {
+        return { data: null, loading: false, error: null };
+    }
 
     return state;
 }

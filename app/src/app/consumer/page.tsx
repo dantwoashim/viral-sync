@@ -11,6 +11,7 @@ export default function ConsumerPage() {
     const publicKey = useWallet();
     const ledger = useCommissionLedger(publicKey, null);
     const txs = useRecentTransactions(publicKey, 4);
+    const dataError = ledger.error || txs.error;
 
     const totalEarned = ledger.data ? formatTokenAmount(ledger.data.totalEarned) : '0';
     const claimed = ledger.data ? formatTokenAmount(ledger.data.totalClaimed) : '0';
@@ -23,14 +24,30 @@ export default function ConsumerPage() {
         { icon: Network, label: 'Tree', color: 'var(--cloud)', bg: 'var(--cloud-soft)', href: '/consumer/profile' },
     ];
 
+    const txTypeLabel: Record<string, string> = {
+        commission: 'Commission',
+        redemption: 'Redemption',
+        share: 'Share',
+        dispute: 'Dispute',
+        unknown: 'Transaction',
+    };
+
     return (
         <>
             <div className="page-top">
-                <h1>功 My Rewards</h1>
+                <h1>My Rewards</h1>
                 {publicKey && <div className="pill pill-gold">{shortenAddress(publicKey.toBase58())}</div>}
             </div>
 
             <div className="page-scroll">
+                {dataError && (
+                    <div className="scroll-card" style={{ padding: 'var(--s4)', marginBottom: 'var(--s4)', borderColor: 'var(--crimson-soft)' }}>
+                        <div style={{ fontSize: 13, color: 'var(--crimson)' }}>
+                            Failed to load rewards snapshot: {dataError}
+                        </div>
+                    </div>
+                )}
+
                 {/* Hero */}
                 <div className="consumer-hero">
                     <div className="total-label">Total Earned</div>
@@ -77,8 +94,10 @@ export default function ConsumerPage() {
                                         <ArrowUpRight size={16} />
                                     </div>
                                     <div className="list-item-content">
-                                        <div className="list-item-title">{tx.type}</div>
-                                        <div className="list-item-sub"><Clock size={9} /> {new Date((tx.timestamp ?? 0) * 1000).toLocaleTimeString()}</div>
+                                        <div className="list-item-title">{txTypeLabel[tx.type] || 'Transaction'}</div>
+                                        <div className="list-item-sub">
+                                            <Clock size={9} /> {tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleTimeString() : 'Pending'}
+                                        </div>
                                     </div>
                                     <div className="list-item-right">
                                         <div className="list-item-amount">{tx.amount ? formatTokenAmount(tx.amount) : '—'}</div>

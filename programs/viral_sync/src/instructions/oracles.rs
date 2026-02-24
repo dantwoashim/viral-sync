@@ -1,17 +1,14 @@
+use crate::state::{merchant_reputation::MerchantReputation, viral_oracle::ViralOracle};
 use anchor_lang::prelude::*;
-use crate::state::{viral_oracle::ViralOracle, merchant_reputation::MerchantReputation};
-use crate::errors::ViralSyncError;
 
 #[derive(Accounts)]
 pub struct ComputeViralOracle<'info> {
-    #[account(mut)]
+    #[account(mut, constraint = viral_oracle.merchant == merchant.key())]
     pub viral_oracle: Account<'info, ViralOracle>,
-    
-    // In production, this would mandate a signature from the Helius/Supabase indexing authority PDA
-    // pub oracle_authority: Signer<'info>, 
-    pub crank: Signer<'info>,
+    pub merchant: Signer<'info>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn compute_viral_oracle(
     ctx: Context<ComputeViralOracle>,
     k_factor: u64,
@@ -27,10 +24,8 @@ pub fn compute_viral_oracle(
     p50_time_share_to_claim_secs: u32,
     commission_per_new_customer_tokens: u64,
     vs_google_ads_efficiency_bps: u32,
-    data_points: u32
+    data_points: u32,
 ) -> Result<()> {
-    // Requires a merkle proof verification from the Helius backend (Omitted for MVP brevity)
-    
     let oracle = &mut ctx.accounts.viral_oracle;
     oracle.k_factor = k_factor;
     oracle.median_referrals_per_user = median_referrals_per_user;
@@ -45,7 +40,6 @@ pub fn compute_viral_oracle(
     oracle.p50_time_share_to_claim_secs = p50_time_share_to_claim_secs;
     oracle.commission_per_new_customer_tokens = commission_per_new_customer_tokens;
     oracle.vs_google_ads_efficiency_bps = vs_google_ads_efficiency_bps;
-    
     oracle.computed_at = Clock::get()?.unix_timestamp;
     oracle.data_points = data_points;
 
@@ -54,11 +48,9 @@ pub fn compute_viral_oracle(
 
 #[derive(Accounts)]
 pub struct ComputeMerchantReputation<'info> {
-    #[account(mut)]
+    #[account(mut, constraint = reputation.merchant == merchant.key())]
     pub reputation: Account<'info, MerchantReputation>,
-    
-    // pub oracle_authority: Signer<'info>,
-    pub crank: Signer<'info>,
+    pub merchant: Signer<'info>,
 }
 
 pub fn compute_merchant_reputation(
@@ -70,7 +62,6 @@ pub fn compute_merchant_reputation(
     avg_poi_score_top_referrers: u32,
     suspicion_score: u32,
 ) -> Result<()> {
-    
     let rep = &mut ctx.accounts.reputation;
     rep.pct_redeemers_aged_over_30_days = pct_redeemers_aged_over_30_days;
     rep.unique_attestation_servers_used = unique_attestation_servers_used;
@@ -78,10 +69,9 @@ pub fn compute_merchant_reputation(
     rep.pct_redemptions_in_business_hours = pct_redemptions_in_business_hours;
     rep.avg_poi_score_top_referrers = avg_poi_score_top_referrers;
     rep.suspicion_score = suspicion_score;
-    
+
     rep.suspicion_computed_at = Clock::get()?.unix_timestamp;
-    
-    // Base reputation calculation heavily penalizes timeout disputes and high suspicion
+
     let penalty = (rep.timeout_disputes * 500).saturating_add(suspicion_score / 10);
     rep.reputation_score = 10_000u32.saturating_sub(penalty);
 

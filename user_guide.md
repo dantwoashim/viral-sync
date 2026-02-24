@@ -1,4 +1,4 @@
-# Viral Sync — User Guide
+# Viral Sync - User Guide
 
 > **Earn rewards for sharing things you love with friends.**
 > No crypto knowledge needed. No wallet setup. Just share, earn, and redeem.

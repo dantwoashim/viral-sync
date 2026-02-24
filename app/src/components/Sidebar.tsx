@@ -4,18 +4,21 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTheme } from '@/app/providers';
+import { useAuth } from '@/lib/auth';
+import { useWallet } from '@/lib/useWallet';
+import { shortenAddress } from '@/lib/solana';
 import {
     BarChart3,
+    Rocket,
     TrendingUp,
     Network,
     ShieldAlert,
     Settings,
     Zap,
-    Sun,
-    Moon,
 } from 'lucide-react';
 
 const merchantNav = [
+    { href: '/launchpad', label: 'Launchpad', icon: Rocket },
     { href: '/', label: 'Overview', icon: BarChart3 },
     { href: '/oracle', label: 'Viral Oracle', icon: TrendingUp },
     { href: '/network', label: 'Network Graph', icon: Network },
@@ -26,6 +29,10 @@ const merchantNav = [
 export default function Sidebar() {
     const pathname = usePathname();
     const { theme, toggleTheme } = useTheme();
+    const { displayName } = useAuth();
+    const wallet = useWallet();
+    const title = displayName || 'Merchant';
+    const initials = title.trim().charAt(0).toUpperCase() || 'M';
 
     return (
         <aside className="sidebar">
@@ -50,46 +57,27 @@ export default function Sidebar() {
                 ))}
             </nav>
 
-            <div style={{ flex: 1 }} />
-
-            <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: 'var(--space-3)',
-                borderTop: '1px solid var(--border-primary)',
-                marginTop: 'var(--space-4)',
-            }}>
-                <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                    {theme === 'light' ? 'Light Mode' : 'Dark Mode'}
-                </span>
-                <button
-                    onClick={toggleTheme}
-                    className="theme-toggle"
-                    aria-label="Toggle theme"
-                >
-                    <div className="theme-toggle-knob" />
-                </button>
-            </div>
-
-            <div style={{
-                padding: 'var(--space-3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--space-3)',
-            }}>
-                <div className="avatar" style={{
-                    background: 'var(--accent-primary-subtle)',
-                    color: 'var(--accent-primary)',
-                }}>
-                    M
+            <div className="sidebar-bottom">
+                <div className="theme-row">
+                    <span style={{ fontSize: 13, color: 'var(--text-2)', fontWeight: 500 }}>
+                        {theme === 'light' ? 'Light Mode' : 'Dark Mode'}
+                    </span>
+                    <button
+                        onClick={toggleTheme}
+                        className={`theme-toggle ${theme === 'dark' ? 'active' : ''}`}
+                        aria-label="Toggle theme"
+                    >
+                        <div className="theme-toggle-knob" />
+                    </button>
                 </div>
-                <div>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        Merchant Co.
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                        Premium Plan
+
+                <div className="sidebar-user">
+                    <div className="sidebar-avatar">{initials}</div>
+                    <div>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{title}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                            {wallet ? shortenAddress(wallet.toBase58()) : 'No wallet'}
+                        </div>
                     </div>
                 </div>
             </div>

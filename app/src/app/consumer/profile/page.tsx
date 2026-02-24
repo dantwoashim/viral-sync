@@ -4,18 +4,27 @@ import React from 'react';
 import { User, Coins, TrendingUp, Shield } from 'lucide-react';
 import { useWallet } from '@/lib/useWallet';
 import { useCommissionLedger, useSolBalance } from '@/lib/hooks';
-import { formatTokenAmount, shortenAddress } from '@/lib/solana';
+import { formatTokenAmount, shortenAddress, lamportsToSol } from '@/lib/solana';
 
 export default function ProfilePage() {
     const publicKey = useWallet();
     const ledger = useCommissionLedger(publicKey, null);
     const sol = useSolBalance(publicKey);
+    const dataError = ledger.error || sol.error;
 
     return (
         <>
-            <div className="page-top"><h1>人 Profile</h1></div>
+            <div className="page-top"><h1>Profile</h1></div>
 
             <div className="page-scroll">
+                {dataError && (
+                    <div className="scroll-card" style={{ padding: 'var(--s4)', marginBottom: 'var(--s4)', borderColor: 'var(--crimson-soft)' }}>
+                        <div style={{ fontSize: 13, color: 'var(--crimson)' }}>
+                            Profile metrics unavailable: {dataError}
+                        </div>
+                    </div>
+                )}
+
                 {/* Avatar */}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 'var(--s6)' }}>
                     <div style={{ width: 68, height: 68, borderRadius: 'var(--radius-full)', background: 'linear-gradient(135deg, var(--crimson), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--s3)' }}>
@@ -39,7 +48,9 @@ export default function ProfilePage() {
                     <div className="stat-card scroll-card">
                         <div className="stat-icon" style={{ background: 'var(--jade-soft)', color: 'var(--jade)' }}><TrendingUp size={16} /></div>
                         <div className="stat-label">SOL Balance</div>
-                        <div className="stat-value">{sol.data !== null && sol.data !== undefined ? sol.data.toFixed(4) : '—'}</div>
+                        <div className="stat-value">
+                            {sol.data !== null && sol.data !== undefined ? lamportsToSol(sol.data).toFixed(4) : '—'}
+                        </div>
                     </div>
                     <div className="stat-card scroll-card">
                         <div className="stat-icon" style={{ background: 'var(--crimson-soft)', color: 'var(--crimson)' }}><Shield size={16} /></div>

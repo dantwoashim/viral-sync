@@ -1,10 +1,10 @@
 /**
- * Viral Sync — Session Key Manager
+ * Session Key Manager
  * Creates temporary keypairs that can sign transactions without user popups.
  * Session keys are:
  * - Time-scoped (expire after configurable duration, default 24h)
  * - Instruction-scoped (only certain operations allowed)
- * - Stored in sessionStorage (cleared on tab close)
+ * - Kept in memory only (not persisted to web storage)
  *
  * In production, session keys are registered on-chain via initSessionKey instruction.
  * This module handles the client-side key management.
@@ -35,33 +35,12 @@ let currentInfo: SessionKeyInfo | null = null;
 
 /**
  * Creates or retrieves the current session key.
- * Keys persist in sessionStorage for the current tab session.
+ * Secret keys are memory-only; metadata is cached in sessionStorage.
  */
 export function getOrCreateSessionKey(): { keypair: Keypair; info: SessionKeyInfo } {
     // Check if we have a valid session key in memory
     if (currentKeypair && currentInfo && currentInfo.expiresAt > Date.now()) {
         return { keypair: currentKeypair, info: currentInfo };
-    }
-
-    // Try to restore from sessionStorage
-    const stored = typeof window !== 'undefined' ? sessionStorage.getItem(SESSION_STORAGE_KEY) : null;
-    if (stored) {
-        try {
-            const parsed = JSON.parse(stored);
-            if (parsed.expiresAt > Date.now() && parsed.secretKey) {
-                currentKeypair = Keypair.fromSecretKey(new Uint8Array(parsed.secretKey));
-                currentInfo = {
-                    publicKey: currentKeypair.publicKey,
-                    createdAt: parsed.createdAt,
-                    expiresAt: parsed.expiresAt,
-                    allowedInstructions: parsed.allowedInstructions || [],
-                    registeredOnChain: parsed.registeredOnChain || false,
-                };
-                return { keypair: currentKeypair, info: currentInfo };
-            }
-        } catch {
-            sessionStorage.removeItem(SESSION_STORAGE_KEY);
-        }
     }
 
     // Create fresh session key
@@ -79,10 +58,9 @@ export function getOrCreateSessionKey(): { keypair: Keypair; info: SessionKeyInf
         registeredOnChain: false,
     };
 
-    // Store in sessionStorage (survives page refresh within same tab)
+    // Store only metadata in sessionStorage. Secret key is never persisted.
     if (typeof window !== 'undefined') {
         sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
-            secretKey: Array.from(currentKeypair.secretKey),
             createdAt: currentInfo.createdAt,
             expiresAt: currentInfo.expiresAt,
             allowedInstructions: currentInfo.allowedInstructions,

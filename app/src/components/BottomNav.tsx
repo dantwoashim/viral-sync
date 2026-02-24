@@ -4,11 +4,11 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
-import { BarChart3, TrendingUp, Scan, Wallet, Settings, Share2, User, Gift } from 'lucide-react';
+import { BarChart3, Rocket, Scan, Wallet, Settings, Share2, User, Gift } from 'lucide-react';
 
 const merchantTabs = [
     { href: '/', label: 'Home', icon: BarChart3 },
-    { href: '/oracle', label: 'Oracle', icon: TrendingUp },
+    { href: '/launchpad', label: 'Launch', icon: Rocket },
     { href: '/pos', label: 'POS', icon: Scan },
     { href: '/network', label: 'Network', icon: Share2 },
     { href: '/settings', label: 'More', icon: Settings },
@@ -25,6 +25,10 @@ const consumerTabs = [
 export default function BottomNav() {
     const pathname = usePathname();
     const { role } = useAuth();
+
+    if (!role) {
+        return null;
+    }
 
     const tabs = role === 'consumer' ? consumerTabs : merchantTabs;
 

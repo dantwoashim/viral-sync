@@ -14,10 +14,11 @@ export const metadata: Metadata = {
 const themeInitScript = `
   (function() {
     try {
-      var theme = localStorage.getItem('vs-theme');
-      if (theme === 'dark') {
-        document.documentElement.setAttribute('data-theme', 'dark');
-      }
+      var stored = localStorage.getItem('vs-theme');
+      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var theme = (stored === 'light' || stored === 'dark') ? stored : (prefersDark ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+      document.documentElement.style.colorScheme = theme;
     } catch(e) {}
   })();
 `;

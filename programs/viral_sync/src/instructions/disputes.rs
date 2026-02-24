@@ -1,12 +1,12 @@
-use anchor_lang::prelude::*;
+use crate::errors::ViralSyncError;
 use crate::state::{
-    dispute_record::{DisputeRecord, DisputeStatus},
     commission_ledger::CommissionLedger,
+    dispute_record::{DisputeRecord, DisputeStatus},
     merchant_reputation::MerchantReputation,
 };
-use crate::errors::ViralSyncError;
+use anchor_lang::prelude::*;
 
-pub const DISPUTE_MERCHANT_RESPONSE_SECS: i64 = 1209600; // 14 days
+pub const DISPUTE_MERCHANT_RESPONSE_SECS: i64 = 1_209_600; // 14 days
 
 #[event]
 pub struct DisputeAutoUpheld {
@@ -18,87 +18,114 @@ pub struct DisputeAutoUpheld {
 
 #[derive(Accounts)]
 pub struct ResolveExpiredDispute<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = dispute_record.watchdog == watchdog.key() @ ViralSyncError::InvalidAuthority
+    )]
     pub dispute_record: Account<'info, DisputeRecord>,
-    
-    #[account(mut)]
+
+    #[account(
+        mut,
+        constraint = commission_ledger.merchant == dispute_record.merchant @ ViralSyncError::InvalidAuthority
+    )]
     pub commission_ledger: Account<'info, CommissionLedger>,
-    
-    #[account(mut)]
+
+    #[account(
+        mut,
+        constraint = merchant_reputation.merchant == dispute_record.merchant @ ViralSyncError::InvalidAuthority
+    )]
     pub merchant_reputation: Account<'info, MerchantReputation>,
-    
-    /// CHECK: Stake Escrow PDA return targets 
+
+    /// CHECK: stake escrow vault plumbing is intentionally deferred.
     #[account(mut)]
     pub dispute_escrow: UncheckedAccount<'info>,
-    
+
     #[account(mut)]
-    pub watchdog: Signer<'info>, 
+    pub watchdog: Signer<'info>,
 }
 
-// Target Fix for Architecture documentation (D3) Auto Resolve
 pub fn resolve_expired_dispute(ctx: Context<ResolveExpiredDispute>) -> Result<()> {
     let dispute = &mut ctx.accounts.dispute_record;
     let now = Clock::get()?.unix_timestamp;
-    
+
     require!(
         dispute.status == DisputeStatus::Pending,
-        ViralSyncError::TokensExpired // Generic "InvalidState" map 
+        ViralSyncError::AccessDenied
     );
-    
-    // Core Engine Rule: Negligent merchant loses instantly over 14 days
     require!(
         now > dispute.raised_at + DISPUTE_MERCHANT_RESPONSE_SECS,
-        ViralSyncError::TokensExpired // e.g., DisputeStillWithinResponseWindow
+        ViralSyncError::TokensExpired
     );
-    
+
     dispute.status = DisputeStatus::UpheldByTimeout;
-    
+    dispute.resolved_at = Some(now);
+
     let commission_ledger = &mut ctx.accounts.commission_ledger;
     let disputed_amount = commission_ledger.frozen_amount;
     let watchdog_share = disputed_amount / 2;
-    
+
     commission_ledger.frozen = false;
-    commission_ledger.claimable = commission_ledger.claimable.saturating_sub(disputed_amount);
-    
-    // Reputation execution logic natively lowering the scores massively for neglect
+    commission_ledger.frozen_amount = 0;
+
     let rep = &mut ctx.accounts.merchant_reputation;
-    rep.timeout_disputes += 1;
+    rep.timeout_disputes = rep
+        .timeout_disputes
+        .checked_add(1)
+        .ok_or(ViralSyncError::MathOverflow)?;
     rep.reputation_score = rep.reputation_score.saturating_sub(500);
-    
-    // Returning the Watchdog's active stake 
-    // **ctx.accounts.dispute_escrow.try_borrow_mut_lamports()? -= dispute.stake_lamports;
-    // **ctx.accounts.watchdog.try_borrow_mut_lamports()? += dispute.stake_lamports;
-    
+
     emit!(DisputeAutoUpheld {
         merchant: dispute.merchant,
         referral: dispute.referral,
         disputed_amount,
         watchdog_reward: watchdog_share,
     });
-    
+
     Ok(())
 }
 
 #[derive(Accounts)]
 pub struct RaiseDispute<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = dispute_record.merchant == commission_ledger.merchant @ ViralSyncError::InvalidAuthority,
+        constraint = dispute_record.watchdog == Pubkey::default() || dispute_record.watchdog == watchdog.key() @ ViralSyncError::InvalidAuthority
+    )]
     pub dispute_record: Account<'info, DisputeRecord>,
-    
+
     #[account(mut)]
     pub commission_ledger: Account<'info, CommissionLedger>,
-    
+
     #[account(mut)]
     pub watchdog: Signer<'info>,
 }
 
 pub fn raise_dispute(ctx: Context<RaiseDispute>, amount: u64) -> Result<()> {
+    require!(amount > 0, ViralSyncError::BelowMinimum);
+
     let dispute = &mut ctx.accounts.dispute_record;
-    dispute.status = DisputeStatus::Pending;
-    dispute.raised_at = Clock::get()?.unix_timestamp;
-    
+    require!(
+        dispute.status != DisputeStatus::Pending,
+        ViralSyncError::AccessDenied
+    );
+
     let ledger = &mut ctx.accounts.commission_ledger;
+    require!(ledger.claimable >= amount, ViralSyncError::InsufficientBalance);
+
+    dispute.status = DisputeStatus::Pending;
+    dispute.watchdog = ctx.accounts.watchdog.key();
+    dispute.raised_at = Clock::get()?.unix_timestamp;
+    dispute.resolved_at = None;
+
+    ledger.claimable = ledger
+        .claimable
+        .checked_sub(amount)
+        .ok_or(ViralSyncError::MathOverflow)?;
     ledger.frozen = true;
-    ledger.frozen_amount = amount;
-    
+    ledger.frozen_amount = ledger
+        .frozen_amount
+        .checked_add(amount)
+        .ok_or(ViralSyncError::MathOverflow)?;
+
     Ok(())
 }

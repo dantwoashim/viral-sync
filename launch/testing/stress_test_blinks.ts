@@ -2,14 +2,14 @@ import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
 // import * as anchor from '@coral-xyz/anchor';
 
 /**
- * Stress Testing the V4 16-slot Inbound Buffer architecture.
+ * Stress testing the 16-slot inbound buffer architecture.
  * This simulates a "Viral Spike" where 100+ users attempt to claim a Blink
  * Escrow associated with a SINGLE Generation PDA simultaneously.
- * Pre-V4 architectures would crash due to concurrent CU overflow.
- * V4 Gracefully catches them in the array, resolving overflows to Dead passes.
+ * Older naive designs would crash due to concurrent CU overflow.
+ * The current model catches overflow and degrades attribution safely.
  */
 async function launchBlinkStressTest() {
-    console.log("============ [V4 STRESS TEST] ============");
+    console.log("============ [STRESS TEST] ============");
     console.log("Initiating Concurrent Blink Escrow Claim simulation...");
 
     const CONCURRENT_USERS = 150;
@@ -26,7 +26,7 @@ async function launchBlinkStressTest() {
 
     const promises = testers.map(async (tester, i) => {
         try {
-            // Mock transaction submission against the RPC
+            // Mock transaction broadcast against the RPC
             // const tx = await buildClaimEscrowTx(tester);
             // await connection.sendTransaction(tx);
 
@@ -47,14 +47,14 @@ async function launchBlinkStressTest() {
 
     await Promise.all(promises);
 
-    console.log("\n--- [V4 STRESS TEST RESULTS] ---");
+    console.log("\n--- [STRESS TEST RESULTS] ---");
     console.log(`Total Attempts: ${CONCURRENT_USERS}`);
     console.log(`Hook Processed Cleanly (Inbound Buffer): ${successCount}`);
     console.log(`Hook Degraded Gracefully (DeadPass Overflow): ${overflowDeadPassCount}`);
     console.log(`Hard Node Failures: ${failureCount}`);
 
     if (failureCount === 0 && overflowDeadPassCount > 0) {
-        console.log("\n✅ ARCHITECTURE PASSED: The V4 Inbound Buffer caught the spike. Referrals degraded gracefully without halting token delivery. The protocol survived the CU exhaustion vector.");
+        console.log("\n✅ ARCHITECTURE PASSED: The inbound buffer absorbed spike traffic and degraded attribution safely without halting token delivery.");
     } else {
         console.log("\n❌ ARCHITECTURE FAILED: Node failures detected.");
     }

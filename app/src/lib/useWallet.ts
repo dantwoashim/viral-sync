@@ -1,5 +1,5 @@
 /**
- * Viral Sync — useWallet Hook
+ * useWallet Hook
  * Single source of truth for the current wallet address.
  * Reads from AuthProvider (connected user) → falls back to env → null.
  * 
@@ -23,8 +23,12 @@ if (ENV_MERCHANT) {
  * Priority: Auth connected wallet → env MERCHANT_PUBKEY → null
  */
 export function useWallet(): PublicKey | null {
-    const { walletAddress } = useAuth();
-    return useMemo(() => walletAddress ?? _envPubkey, [walletAddress]);
+    const { walletAddress, role } = useAuth();
+    return useMemo(() => {
+        if (walletAddress) return walletAddress;
+        if (role === 'merchant') return _envPubkey;
+        return null;
+    }, [walletAddress, role]);
 }
 
 /**

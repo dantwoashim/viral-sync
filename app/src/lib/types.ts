@@ -1,11 +1,11 @@
 /**
- * Viral Sync — TypeScript types mirroring on-chain state accounts.
+ * TypeScript types mirroring on-chain state accounts.
  * Every interface exactly matches the Rust structs in programs/viral_sync/src/state/
  */
 
 import { PublicKey } from '@solana/web3.js';
 
-/* ── Enums ── */
+// Enums
 
 export enum DisputeStatus {
     Pending = 'Pending',
@@ -20,7 +20,7 @@ export enum GenSource {
     Issuance = 'Issuance',
 }
 
-/* ── On-Chain Account Types ── */
+// On-Chain Account Types
 
 export interface MerchantConfig {
     bump: number;
@@ -180,7 +180,7 @@ export interface GeoFence {
     nonGeoCommissionPenaltyBps: number;
 }
 
-/* ── UI-Derived Types ── */
+// UI-Derived Types
 
 export interface ActivityItem {
     signature: string;

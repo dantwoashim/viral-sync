@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 use anchor_lang::prelude::*;
 
 pub mod errors;
@@ -28,15 +30,25 @@ pub mod viral_sync {
         transfer_fee_bps: u16,
         min_hold_before_share_secs: i64,
     ) -> Result<()> {
-        instructions::merchant_init::create_mint_and_config(ctx, commission_rate_bps, transfer_fee_bps, min_hold_before_share_secs)
+        instructions::merchant_init::create_mint_and_config(
+            ctx,
+            commission_rate_bps,
+            transfer_fee_bps,
+            min_hold_before_share_secs,
+        )
     }
 
-    pub fn issue_first_tokens_and_lock(ctx: Context<IssueFirstTokensAndLock>, amount: u64) -> Result<()> {
+    pub fn issue_first_tokens_and_lock(
+        ctx: Context<IssueFirstTokensAndLock>,
+        amount: u64,
+    ) -> Result<()> {
         instructions::merchant_init::issue_first_tokens_and_lock(ctx, amount)
     }
 
     // Phase 2
-    pub fn initialize_extra_account_meta_list(ctx: Context<InitExtraAccountMetaList>) -> Result<()> {
+    pub fn initialize_extra_account_meta_list(
+        ctx: Context<InitExtraAccountMetaList>,
+    ) -> Result<()> {
         instructions::transfer_hook::initialize_extra_account_meta_list(ctx)
     }
 
@@ -49,7 +61,10 @@ pub mod viral_sync {
     }
 
     // Phase 3: Redemption & Commissions
-    pub fn process_redemption_slot(ctx: Context<ProcessRedemptionSlot>, slot_idx: u8) -> Result<()> {
+    pub fn process_redemption_slot(
+        ctx: Context<ProcessRedemptionSlot>,
+        slot_idx: u8,
+    ) -> Result<()> {
         instructions::process_redemption::process_redemption_slot(ctx, slot_idx)
     }
 
@@ -83,6 +98,7 @@ pub mod viral_sync {
     }
 
     // Phase 5: Concurrency and Oracle Systems
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_viral_oracle(
         ctx: Context<ComputeViralOracle>,
         k_factor: u64,
@@ -98,13 +114,24 @@ pub mod viral_sync {
         p50_time_share_to_claim_secs: u32,
         commission_per_new_customer_tokens: u64,
         vs_google_ads_efficiency_bps: u32,
-        data_points: u32
+        data_points: u32,
     ) -> Result<()> {
         instructions::oracles::compute_viral_oracle(
-            ctx, k_factor, median_referrals_per_user, p90_referrals_per_user, p10_referrals_per_user,
-            referral_concentration_index, share_rate, claim_rate, first_redeem_rate, avg_time_share_to_claim_secs,
-            avg_time_claim_to_redeem_secs, p50_time_share_to_claim_secs, commission_per_new_customer_tokens,
-            vs_google_ads_efficiency_bps, data_points
+            ctx,
+            k_factor,
+            median_referrals_per_user,
+            p90_referrals_per_user,
+            p10_referrals_per_user,
+            referral_concentration_index,
+            share_rate,
+            claim_rate,
+            first_redeem_rate,
+            avg_time_share_to_claim_secs,
+            avg_time_claim_to_redeem_secs,
+            p50_time_share_to_claim_secs,
+            commission_per_new_customer_tokens,
+            vs_google_ads_efficiency_bps,
+            data_points,
         )
     }
 
@@ -118,13 +145,22 @@ pub mod viral_sync {
         suspicion_score: u32,
     ) -> Result<()> {
         instructions::oracles::compute_merchant_reputation(
-            ctx, pct_redeemers_aged_over_30_days, unique_attestation_servers_used, 
-            commission_concentration_bps, pct_redemptions_in_business_hours, 
-            avg_poi_score_top_referrers, suspicion_score
+            ctx,
+            pct_redeemers_aged_over_30_days,
+            unique_attestation_servers_used,
+            commission_concentration_bps,
+            pct_redemptions_in_business_hours,
+            avg_poi_score_top_referrers,
+            suspicion_score,
         )
     }
 
-    pub fn redeem_with_geo(ctx: Context<RedeemWithGeo>, lat_micro: i32, lng_micro: i32, signature: Vec<u8>) -> Result<()> {
+    pub fn redeem_with_geo(
+        ctx: Context<RedeemWithGeo>,
+        lat_micro: i32,
+        lng_micro: i32,
+        signature: Vec<u8>,
+    ) -> Result<()> {
         instructions::geo_fencing::redeem_with_geo(ctx, lat_micro, lng_micro, signature)
     }
 
@@ -153,8 +189,12 @@ pub mod viral_sync {
         instructions::disputes::resolve_expired_dispute(ctx)
     }
 
-    // Phase 9: Seamless Client Architecture & Relayer (On-Chain)
-    pub fn create_session_key(ctx: Context<CreateSessionKey>, expires_at: i64, max_tokens_per_session: u64) -> Result<()> {
+    // Session keys
+    pub fn create_session_key(
+        ctx: Context<CreateSessionKey>,
+        expires_at: i64,
+        max_tokens_per_session: u64,
+    ) -> Result<()> {
         instructions::session_management::create_session_key(ctx, expires_at, max_tokens_per_session)
     }
 

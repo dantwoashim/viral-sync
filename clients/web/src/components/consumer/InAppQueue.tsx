@@ -8,8 +8,8 @@ interface InAppQueueProps {
 }
 
 /**
- * Consumer Component representing the V4 Engine Auto-Finalizer.
- * In V4, inbound buffers map 16 transfers before dropping to generic DeadPasses. 
+ * Consumer component representing the auto-finalizer workflow.
+ * Inbound buffers map 16 transfers before dropping to generic DeadPasses.
  * This component runs silently in the PWA, pinging the Relayer to crank `finalize_inbound`
  * and attribute the locked referrals, completely abstracting gas from the user.
  */
@@ -30,7 +30,7 @@ export const InAppQueue: React.FC<InAppQueueProps> = ({ generationPda, hasPendin
             console.log(`Pinging Relayer to finalize inbound transfers for generation PDA: ${generationPda.toBase58()}`);
 
             // In production, build an unsigned Transaction targeting `finalize_inbound` here
-            // and POST it to the `/relay` endpoint engineered in Week 5
+            // and POST it to the `/relay` endpoint
             const RELAY_URL = process.env.NEXT_PUBLIC_RELAY_URL || 'http://localhost:3000/relay';
 
             /*

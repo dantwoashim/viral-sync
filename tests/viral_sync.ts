@@ -10,7 +10,7 @@ import {
 } from "@solana/spl-token";
 import { expect } from "chai";
 
-describe("viral_sync_v4_core", () => {
+describe("viral_sync_core", () => {
   // Configure the client to use the local cluster.
   anchor.setProvider(anchor.AnchorProvider.env());
 
@@ -27,20 +27,20 @@ describe("viral_sync_v4_core", () => {
   });
 
   it("Executes init_token_generation (Pre-Flight Rule)", async () => {
-    // Generate PDA seeds: b"gen_v4", mint.key(), destination_ata_owner.key()
+    // Generate PDA seeds: b"gen", mint.key(), destination_ata_owner.key()
     const owner = anchor.web3.Keypair.generate();
     
     // Simulate PDA derivation
     const [genPda, bump] = anchor.web3.PublicKey.findProgramAddressSync(
       [
-        Buffer.from("gen_v4"),
+        Buffer.from("gen"),
         anchor.web3.Keypair.generate().publicKey.toBuffer(), // Mock mint
         owner.publicKey.toBuffer()
       ],
       program.programId
     );
 
-    // This simulates the client-side preflight invocation mandated by V4 Architecture (Rule D1)
+    // This simulates the client-side preflight invocation for Rule D1.
     // await program.methods
     //   .initTokenGeneration()
     //   .accounts({

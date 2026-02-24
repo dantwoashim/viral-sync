@@ -1,20 +1,22 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ChevronRight, Shield, Bell, Palette, Globe, Key, HelpCircle, LogOut, Coins, User, Moon, Sun, Check, X } from 'lucide-react';
+import { ChevronRight, Shield, Bell, Globe, Key, HelpCircle, LogOut, Coins, User, Moon, Sun, Rocket } from 'lucide-react';
 import { useWallet } from '@/lib/useWallet';
 import { useAuth } from '@/lib/auth';
+import { useTheme } from '@/app/providers';
 import { useMerchantConfig } from '@/lib/hooks';
 import { shortenAddress, bpsToPercent } from '@/lib/solana';
 import { useRouter } from 'next/navigation';
 
 export default function SettingsPage() {
     const publicKey = useWallet();
-    const { authenticated, logout, displayName, loginMethod, role } = useAuth();
+    const { logout, displayName, loginMethod, role, googleEnabled, authError } = useAuth();
+    const { theme, toggleTheme } = useTheme();
     const config = useMerchantConfig(publicKey);
     const router = useRouter();
 
-    const [darkMode, setDarkMode] = useState(true);
+    const isDark = theme === 'dark';
     const [notifs, setNotifs] = useState(true);
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
@@ -25,7 +27,7 @@ export default function SettingsPage() {
 
     return (
         <>
-            <div className="page-top"><h1>设 Settings</h1></div>
+            <div className="page-top"><h1>Settings</h1></div>
 
             <div className="page-scroll">
                 {/* Profile Card */}
@@ -44,11 +46,19 @@ export default function SettingsPage() {
                     </div>
                 </div>
 
-                {/* Token Config (Merchant only) */}
+                {/* Merchant section */}
                 {role === 'merchant' && (
                     <div className="section">
                         <div className="section-header"><span className="section-title">Merchant</span></div>
                         <div className="list-card">
+                            <button className="list-item" onClick={() => router.push('/launchpad')} style={{ width: '100%', textAlign: 'left' }}>
+                                <div className="list-item-icon" style={{ background: 'var(--gold-soft)', color: 'var(--gold)' }}><Rocket size={16} /></div>
+                                <div className="list-item-content">
+                                    <div className="list-item-title">Command Center</div>
+                                    <div className="list-item-sub">Readiness checks, blockers, growth playbook</div>
+                                </div>
+                                <ChevronRight size={14} color="var(--text-hint)" />
+                            </button>
                             <button className="list-item" onClick={() => router.push('/oracle')} style={{ width: '100%', textAlign: 'left' }}>
                                 <div className="list-item-icon" style={{ background: 'var(--gold-soft)', color: 'var(--gold)' }}><Coins size={16} /></div>
                                 <div className="list-item-content">
@@ -83,26 +93,26 @@ export default function SettingsPage() {
                 <div className="section">
                     <div className="section-header"><span className="section-title">App</span></div>
                     <div className="list-card">
-                        {/* Dark Mode Toggle */}
-                        <button className="list-item" onClick={() => setDarkMode(!darkMode)} style={{ width: '100%', textAlign: 'left' }}>
+                        {/* Dark Mode — REAL toggle */}
+                        <button className="list-item" onClick={toggleTheme} style={{ width: '100%', textAlign: 'left' }}>
                             <div className="list-item-icon" style={{ background: 'var(--cloud-soft)', color: 'var(--cloud)' }}>
-                                {darkMode ? <Moon size={16} /> : <Sun size={16} />}
+                                {isDark ? <Moon size={16} /> : <Sun size={16} />}
                             </div>
                             <div className="list-item-content">
-                                <div className="list-item-title">Dark Mode</div>
-                                <div className="list-item-sub">{darkMode ? 'On' : 'Off'}</div>
+                                <div className="list-item-title">{isDark ? 'Dark Mode' : 'Light Mode'}</div>
+                                <div className="list-item-sub">{isDark ? 'Dark palette enabled' : 'Light palette enabled'}</div>
                             </div>
-                            <div style={{ width: 40, height: 22, borderRadius: 'var(--radius-full)', background: darkMode ? 'var(--jade)' : 'var(--mist-strong)', padding: 2, transition: 'all 0.2s ease', cursor: 'pointer' }}>
-                                <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'white', transform: darkMode ? 'translateX(18px)' : 'translateX(0)', transition: 'transform 0.2s ease' }} />
+                            <div style={{ width: 40, height: 22, borderRadius: 'var(--radius-full)', background: isDark ? 'var(--jade)' : 'var(--mist-strong)', padding: 2, transition: 'all 0.2s ease' }}>
+                                <div style={{ width: 18, height: 18, borderRadius: '50%', background: isDark ? 'white' : '#999', transform: isDark ? 'translateX(18px)' : 'translateX(0)', transition: 'transform 0.2s ease' }} />
                             </div>
                         </button>
 
-                        {/* Notifications Toggle */}
+                        {/* Notifications */}
                         <button className="list-item" onClick={() => setNotifs(!notifs)} style={{ width: '100%', textAlign: 'left' }}>
                             <div className="list-item-icon" style={{ background: 'var(--gold-soft)', color: 'var(--gold)' }}><Bell size={16} /></div>
                             <div className="list-item-content">
                                 <div className="list-item-title">Notifications</div>
-                                <div className="list-item-sub">{notifs ? 'Enabled (Dialect)' : 'Disabled'}</div>
+                                <div className="list-item-sub">{notifs ? 'Enabled' : 'Disabled'}</div>
                             </div>
                             <div style={{ width: 40, height: 22, borderRadius: 'var(--radius-full)', background: notifs ? 'var(--jade)' : 'var(--mist-strong)', padding: 2, transition: 'all 0.2s ease' }}>
                                 <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'white', transform: notifs ? 'translateX(18px)' : 'translateX(0)', transition: 'transform 0.2s ease' }} />
@@ -114,8 +124,19 @@ export default function SettingsPage() {
                             <div className="list-item-icon" style={{ background: 'var(--crimson-soft)', color: 'var(--crimson)' }}><Key size={16} /></div>
                             <div className="list-item-content">
                                 <div className="list-item-title">Connected Wallet</div>
-                                <div className="list-item-sub" style={{ fontFamily: 'var(--font-mono)' }}>
+                                <div className="list-item-sub" style={{ fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
                                     {publicKey ? publicKey.toBase58() : 'No wallet connected'}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="list-item">
+                            <div className="list-item-icon" style={{ background: 'var(--jade-soft)', color: 'var(--jade)' }}><Shield size={16} /></div>
+                            <div className="list-item-content">
+                                <div className="list-item-title">Authentication Provider</div>
+                                <div className="list-item-sub" style={{ whiteSpace: 'normal' }}>
+                                    {googleEnabled ? 'Firebase Google enabled' : 'Demo mode only'}
+                                    {authError ? ` · Last error: ${authError}` : ''}
                                 </div>
                             </div>
                         </div>
@@ -135,7 +156,6 @@ export default function SettingsPage() {
                             <ChevronRight size={14} color="var(--text-hint)" />
                         </a>
 
-                        {/* Switch Role */}
                         <button className="list-item" onClick={() => router.push('/login')} style={{ width: '100%', textAlign: 'left' }}>
                             <div className="list-item-icon" style={{ background: 'var(--gold-soft)', color: 'var(--gold)' }}><User size={16} /></div>
                             <div className="list-item-content">
@@ -145,7 +165,6 @@ export default function SettingsPage() {
                             <ChevronRight size={14} color="var(--text-hint)" />
                         </button>
 
-                        {/* Sign Out */}
                         {!showLogoutConfirm ? (
                             <button className="list-item" onClick={() => setShowLogoutConfirm(true)} style={{ width: '100%', textAlign: 'left' }}>
                                 <div className="list-item-icon" style={{ background: 'var(--crimson-soft)', color: 'var(--crimson)' }}><LogOut size={16} /></div>
@@ -158,12 +177,8 @@ export default function SettingsPage() {
                                 <div className="list-item-content">
                                     <div className="list-item-title">Sign out?</div>
                                 </div>
-                                <button onClick={handleLogout} style={{ padding: '6px 16px', background: 'var(--crimson)', color: 'white', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: 13 }}>
-                                    Yes
-                                </button>
-                                <button onClick={() => setShowLogoutConfirm(false)} style={{ padding: '6px 16px', background: 'var(--mist-strong)', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: 13 }}>
-                                    No
-                                </button>
+                                <button onClick={handleLogout} style={{ padding: '6px 16px', background: 'var(--crimson)', color: 'white', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: 13 }}>Yes</button>
+                                <button onClick={() => setShowLogoutConfirm(false)} style={{ padding: '6px 16px', background: 'var(--mist-strong)', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: 13 }}>No</button>
                             </div>
                         )}
                     </div>

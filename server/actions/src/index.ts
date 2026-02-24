@@ -44,7 +44,7 @@ app.get('/actions/viral-sync', async (req: Request, res: Response) => {
     const payload = {
         title: "Claim Viral-Sync Referral Token",
         icon: "https://viralsync.io/assets/action-hero.png",
-        description: "You've been invited! Claim your escrowed connection token utilizing the V4 Transfer Hooks protocol so we can track the lineage of your purchases.",
+        description: "You've been invited. Claim your escrowed referral token to activate on-chain attribution for your purchases.",
         label: "Claim Escrow",
     };
 
@@ -54,7 +54,7 @@ app.get('/actions/viral-sync', async (req: Request, res: Response) => {
 /**
  * Endpoint: POST /actions/viral-sync
  * Goal: Ingest the interacting user's public key from the wallet adaptor,
- * construct the precise V4 `create_escrow_share` transaction, and return it.
+ * construct the `create_escrow_share` transaction, and return it.
  */
 app.post('/actions/viral-sync', async (req: Request, res: Response) => {
     try {

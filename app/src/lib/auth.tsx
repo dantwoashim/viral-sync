@@ -1,20 +1,29 @@
 /**
- * Viral Sync — Auth Provider
- * 
- * Uses DemoAuth always. Privy integration is handled separately
- * via providers.tsx when running in a browser (not in APK).
- * 
- * The DemoLoginModal provides Google/Apple/Email sign-in flow
- * with the Xianxia aesthetic. Each login creates a deterministic
- * demo wallet address.
+ * Viral Sync - Auth Provider
+ *
+ * Supports:
+ * - Firebase Google auth (popup on desktop, redirect on mobile/native)
+ * - Demo auth fallback (no backend required)
  */
 
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import { PublicKey } from '@solana/web3.js';
+import { Capacitor } from '@capacitor/core';
+import { PublicKey, Keypair } from '@solana/web3.js';
+import {
+    GoogleAuthProvider,
+    getRedirectResult,
+    onAuthStateChanged,
+    signInWithPopup,
+    signInWithRedirect,
+    signOut,
+    type Auth as FirebaseAuth,
+    type User as FirebaseUser,
+} from 'firebase/auth';
+import { getFirebaseAuth } from './firebase';
 
-/* ── Types ── */
+// Types
 
 export type UserRole = 'consumer' | 'merchant' | null;
 
@@ -30,10 +39,29 @@ export interface AuthState {
     logout: () => void;
     setRole: (role: UserRole) => void;
     hasSessionKey: boolean;
+    googleEnabled: boolean;
+    authError: string | null;
 }
 
+type StoredSession = {
+    walletAddress?: string;
+    displayName?: string;
+    loginMethod?: AuthState['loginMethod'];
+    role?: UserRole;
+};
+
+type InitialSessionState = {
+    authenticated: boolean;
+    walletAddress: PublicKey | null;
+    displayName: string;
+    loginMethod: AuthState['loginMethod'];
+    role: UserRole;
+};
+
+type GoogleAuthFlow = 'popup-first' | 'redirect-first';
+
 const defaultAuth: AuthState = {
-    loading: true,
+    loading: false,
     authenticated: false,
     walletAddress: null,
     displayName: '',
@@ -44,93 +72,381 @@ const defaultAuth: AuthState = {
     logout: () => { },
     setRole: () => { },
     hasSessionKey: false,
+    googleEnabled: false,
+    authError: null,
 };
+
+const AUTH_STORAGE_KEY = 'vs-auth-session';
+const ROLE_STORAGE_KEY = 'vs-user-role';
+
+function parseRole(value: unknown): UserRole {
+    return value === 'consumer' || value === 'merchant' ? value : null;
+}
+
+function parseLoginMethod(value: unknown): AuthState['loginMethod'] {
+    return value === 'google' || value === 'apple' || value === 'email' || value === 'demo'
+        ? value
+        : null;
+}
+
+function readStoredRole(): UserRole {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+    return parseRole(window.localStorage.getItem(ROLE_STORAGE_KEY));
+}
+
+function persistStoredRole(role: UserRole): void {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    if (role) {
+        window.localStorage.setItem(ROLE_STORAGE_KEY, role);
+    } else {
+        window.localStorage.removeItem(ROLE_STORAGE_KEY);
+    }
+}
+
+function clearStoredSession(): void {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+}
+
+function persistStoredSession(session: StoredSession): void {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+}
+
+function readStoredSession(): InitialSessionState {
+    const empty: InitialSessionState = {
+        authenticated: false,
+        walletAddress: null,
+        displayName: '',
+        loginMethod: null,
+        role: readStoredRole(),
+    };
+
+    if (typeof window === 'undefined') {
+        return empty;
+    }
+
+    try {
+        const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+        if (!raw) {
+            return empty;
+        }
+
+        const parsed = JSON.parse(raw) as StoredSession;
+        if (!parsed.walletAddress) {
+            return empty;
+        }
+
+        const loginMethod = parseLoginMethod(parsed.loginMethod);
+        if (!loginMethod) {
+            return empty;
+        }
+
+        return {
+            authenticated: true,
+            walletAddress: new PublicKey(parsed.walletAddress),
+            displayName: parsed.displayName || '',
+            loginMethod,
+            role: parseRole(parsed.role) || readStoredRole(),
+        };
+    } catch {
+        clearStoredSession();
+        return empty;
+    }
+}
+
+function deriveWalletFromStableId(stableId: string): PublicKey {
+    const bytes = new Uint8Array(32);
+    for (let i = 0; i < stableId.length; i += 1) {
+        const code = stableId.charCodeAt(i) & 0xff;
+        const a = i % 32;
+        const b = (i * 7) % 32;
+        bytes[a] = (bytes[a] + code + (i & 0xff)) & 0xff;
+        bytes[b] = (bytes[b] ^ ((code * 31) & 0xff)) & 0xff;
+    }
+    bytes[0] ^= 0x42;
+    bytes[31] ^= 0x99;
+    return new PublicKey(bytes);
+}
+
+function pickGoogleAuthFlow(): GoogleAuthFlow {
+    if (typeof window === 'undefined') {
+        return 'popup-first';
+    }
+    if (Capacitor.isNativePlatform()) {
+        return 'popup-first';
+    }
+    const ua = window.navigator.userAgent.toLowerCase();
+    return /android|iphone|ipad|ipod/.test(ua) ? 'redirect-first' : 'popup-first';
+}
+
+function humanizeAuthError(error: unknown): string {
+    const code = (error as { code?: string })?.code || '';
+
+    if (code.includes('popup-blocked')) {
+        return 'Popup blocked. Allow popups or try redirect sign-in.';
+    }
+    if (code.includes('popup-closed-by-user')) {
+        return 'Google sign-in was cancelled.';
+    }
+    if (code.includes('cancelled-popup-request')) {
+        return 'Another sign-in request is already in progress.';
+    }
+    if (code.includes('unauthorized-domain')) {
+        return 'This domain is not authorized in Firebase Auth settings.';
+    }
+    if (code.includes('web-storage-unsupported')) {
+        return 'Web storage is unavailable. Enable storage/cookies and retry.';
+    }
+    if (code.includes('network-request-failed')) {
+        return 'Network error while connecting to Google.';
+    }
+    if (code.includes('operation-not-allowed')) {
+        return 'Google provider is disabled in Firebase Auth.';
+    }
+
+    return (error as { message?: string })?.message || 'Authentication failed. Please try again.';
+}
+
+function applyFirebaseUserToState(
+    user: FirebaseUser,
+    role: UserRole,
+    setAuthenticated: (value: boolean) => void,
+    setWalletAddress: (value: PublicKey | null) => void,
+    setDisplayName: (value: string) => void,
+    setLoginMethod: (value: AuthState['loginMethod']) => void,
+): void {
+    const mappedWallet = deriveWalletFromStableId(`google:${user.uid}`);
+    const mappedName = user.displayName || user.email?.split('@')[0] || 'Google User';
+
+    setAuthenticated(true);
+    setWalletAddress(mappedWallet);
+    setDisplayName(mappedName);
+    setLoginMethod('google');
+
+    persistStoredSession({
+        walletAddress: mappedWallet.toBase58(),
+        displayName: mappedName,
+        loginMethod: 'google',
+        role,
+    });
+}
 
 const AuthContext = createContext<AuthState>(defaultAuth);
 export const useAuth = () => useContext(AuthContext);
 
-/* ═══════════════════════════════════════════════════
-   AUTH PROVIDER
-   ═══════════════════════════════════════════════════ */
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [loading, setLoading] = useState(true);
-    const [authenticated, setAuthenticated] = useState(false);
-    const [walletAddress, setWalletAddress] = useState<PublicKey | null>(null);
-    const [displayName, setDisplayName] = useState('');
-    const [loginMethod, setLoginMethod] = useState<AuthState['loginMethod']>(null);
-    const [role, setRole] = useState<UserRole>(null);
-    const [showModal, setShowModal] = useState(false);
+    const firebaseAuth = useMemo<FirebaseAuth | null>(() => getFirebaseAuth(), []);
+    const [initialSession] = useState<InitialSessionState>(() => readStoredSession());
 
-    // Restore session from localStorage on mount
+    const [loading, setLoading] = useState<boolean>(Boolean(firebaseAuth));
+    const [authenticated, setAuthenticated] = useState(initialSession.authenticated);
+    const [walletAddress, setWalletAddress] = useState<PublicKey | null>(initialSession.walletAddress);
+    const [displayName, setDisplayName] = useState(initialSession.displayName);
+    const [loginMethod, setLoginMethod] = useState<AuthState['loginMethod']>(initialSession.loginMethod);
+    const [role, setRole] = useState<UserRole>(initialSession.role);
+    const [showModal, setShowModal] = useState(false);
+    const [authError, setAuthError] = useState<string | null>(null);
+    const [authBusy, setAuthBusy] = useState(false);
+
     useEffect(() => {
-        try {
-            const savedSession = localStorage.getItem('vs-auth-session');
-            if (savedSession) {
-                const s = JSON.parse(savedSession);
-                if (s.walletAddress) {
-                    setWalletAddress(new PublicKey(s.walletAddress));
-                    setDisplayName(s.displayName || '');
-                    setLoginMethod(s.loginMethod || 'demo');
-                    setRole(s.role || null);
+        if (!firebaseAuth) {
+            return;
+        }
+
+        let mounted = true;
+
+        void getRedirectResult(firebaseAuth).catch((error) => {
+            if (mounted) {
+                setAuthError(humanizeAuthError(error));
+                setAuthBusy(false);
+            }
+        });
+
+        const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
+            if (!mounted) {
+                return;
+            }
+
+            const roleFromStorage = readStoredRole();
+            setRole((currentRole) => (currentRole === roleFromStorage ? currentRole : roleFromStorage));
+
+            if (user) {
+                applyFirebaseUserToState(
+                    user,
+                    roleFromStorage,
+                    setAuthenticated,
+                    setWalletAddress,
+                    setDisplayName,
+                    setLoginMethod,
+                );
+                setAuthError(null);
+                setShowModal(false);
+            } else {
+                const stored = readStoredSession();
+                if (stored.authenticated && stored.loginMethod === 'demo') {
                     setAuthenticated(true);
+                    setWalletAddress(stored.walletAddress);
+                    setDisplayName(stored.displayName);
+                    setLoginMethod('demo');
+                    setRole(stored.role);
+                } else {
+                    clearStoredSession();
+                    setAuthenticated(false);
+                    setWalletAddress(null);
+                    setDisplayName('');
+                    setLoginMethod(null);
                 }
             }
-        } catch {
-            localStorage.removeItem('vs-auth-session');
-        }
-        setLoading(false);
-    }, []);
 
-    const login = useCallback(() => setShowModal(true), []);
+            setLoading(false);
+            setAuthBusy(false);
+        });
+
+        return () => {
+            mounted = false;
+            unsubscribe();
+        };
+    }, [firebaseAuth]);
+
+    const login = useCallback(() => {
+        if (authBusy) {
+            return;
+        }
+        setAuthError(null);
+        setShowModal(true);
+    }, [authBusy]);
+
+    const loginWithGoogle = useCallback(async () => {
+        if (!firebaseAuth) {
+            setAuthError('Google sign-in is not configured. Add Firebase env vars first.');
+            return;
+        }
+        if (authBusy) {
+            return;
+        }
+
+        setAuthError(null);
+        setShowModal(false);
+        setAuthBusy(true);
+
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        const flow = pickGoogleAuthFlow();
+
+        try {
+            if (flow === 'redirect-first') {
+                await signInWithRedirect(firebaseAuth, provider);
+                return;
+            }
+            await signInWithPopup(firebaseAuth, provider);
+        } catch (error) {
+            const code = (error as { code?: string })?.code || '';
+            const shouldFallbackToRedirect =
+                code.includes('popup') || code.includes('operation-not-supported');
+            const shouldFallbackToPopup =
+                code.includes('web-storage-unsupported') || code.includes('auth/argument-error');
+
+            if (flow === 'popup-first' && shouldFallbackToRedirect) {
+                try {
+                    await signInWithRedirect(firebaseAuth, provider);
+                    return;
+                } catch (redirectError) {
+                    setAuthError(humanizeAuthError(redirectError));
+                }
+            } else if (flow === 'redirect-first' && shouldFallbackToPopup) {
+                try {
+                    await signInWithPopup(firebaseAuth, provider);
+                    return;
+                } catch (popupError) {
+                    setAuthError(humanizeAuthError(popupError));
+                }
+            } else {
+                setAuthError(humanizeAuthError(error));
+            }
+
+            setAuthBusy(false);
+            setShowModal(true);
+        }
+    }, [firebaseAuth, authBusy]);
+
+    const loginWithDemo = useCallback((name: string) => {
+        const trimmed = name.trim();
+        if (!trimmed) {
+            return;
+        }
+
+        const pubkey = Keypair.generate().publicKey;
+        setWalletAddress(pubkey);
+        setDisplayName(trimmed);
+        setLoginMethod('demo');
+        setAuthenticated(true);
+        setShowModal(false);
+        setAuthError(null);
+
+        persistStoredSession({
+            walletAddress: pubkey.toBase58(),
+            displayName: trimmed,
+            loginMethod: 'demo',
+            role,
+        });
+    }, [role]);
 
     const logout = useCallback(() => {
-        setAuthenticated(false);
-        setWalletAddress(null);
-        setDisplayName('');
-        setLoginMethod(null);
-        setRole(null);
-        localStorage.removeItem('vs-auth-session');
-        localStorage.removeItem('vs-user-role');
-    }, []);
+        const doLogout = async () => {
+            if (firebaseAuth?.currentUser) {
+                try {
+                    await signOut(firebaseAuth);
+                } catch {
+                    // Ignore signout failures and continue local cleanup.
+                }
+            }
+
+            setAuthenticated(false);
+            setWalletAddress(null);
+            setDisplayName('');
+            setLoginMethod(null);
+            setRole(null);
+            setShowModal(false);
+            setAuthError(null);
+            setAuthBusy(false);
+            clearStoredSession();
+            persistStoredRole(null);
+            if (typeof window !== 'undefined') {
+                window.localStorage.removeItem('vs-pending-role');
+            }
+        };
+
+        void doLogout();
+    }, [firebaseAuth]);
 
     const handleSetRole = useCallback((newRole: UserRole) => {
         setRole(newRole);
-        // Also update the saved session
-        const saved = localStorage.getItem('vs-auth-session');
-        if (saved) {
-            try {
-                const s = JSON.parse(saved);
-                s.role = newRole;
-                localStorage.setItem('vs-auth-session', JSON.stringify(s));
-            } catch { }
+        persistStoredRole(newRole);
+        if (typeof window === 'undefined') {
+            return;
         }
-        if (newRole) localStorage.setItem('vs-user-role', newRole);
-        else localStorage.removeItem('vs-user-role');
+
+        try {
+            const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+            if (!raw) {
+                return;
+            }
+            const parsed = JSON.parse(raw) as StoredSession;
+            parsed.role = newRole;
+            persistStoredSession(parsed);
+        } catch {
+            // Ignore malformed payloads; auth will rebuild session on next login.
+        }
     }, []);
-
-    const handleLogin = useCallback((method: string, name: string) => {
-        // Generate a deterministic wallet address from the name
-        const seed = new Uint8Array(32);
-        const nameBytes = new TextEncoder().encode(name + method + 'viral-sync');
-        for (let i = 0; i < Math.min(nameBytes.length, 32); i++) {
-            seed[i] = nameBytes[i];
-        }
-        let pubkey: PublicKey;
-        try { pubkey = new PublicKey(seed); } catch { pubkey = PublicKey.default; }
-
-        setWalletAddress(pubkey);
-        setDisplayName(name);
-        setLoginMethod(method as AuthState['loginMethod']);
-        setAuthenticated(true);
-        setShowModal(false);
-        localStorage.setItem('vs-auth-session', JSON.stringify({
-            walletAddress: pubkey.toBase58(),
-            displayName: name,
-            loginMethod: method,
-            role,
-        }));
-    }, [role]);
 
     const value = useMemo<AuthState>(() => ({
         loading,
@@ -144,172 +460,182 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         setRole: handleSetRole,
         hasSessionKey: false,
-    }), [loading, authenticated, walletAddress, displayName, loginMethod, role, login, logout, handleSetRole]);
+        googleEnabled: Boolean(firebaseAuth),
+        authError,
+    }), [
+        loading,
+        authenticated,
+        walletAddress,
+        displayName,
+        loginMethod,
+        role,
+        login,
+        logout,
+        handleSetRole,
+        firebaseAuth,
+        authError,
+    ]);
 
     return (
         <AuthContext.Provider value={value}>
             {children}
             {showModal && (
-                <LoginModal onClose={() => setShowModal(false)} onLogin={handleLogin} />
+                <LoginModal
+                    onClose={() => setShowModal(false)}
+                    onGoogle={loginWithGoogle}
+                    onDemo={loginWithDemo}
+                    googleEnabled={Boolean(firebaseAuth)}
+                    error={authError}
+                    busy={authBusy}
+                />
             )}
         </AuthContext.Provider>
     );
 }
 
-/* ═══════════════════════════════════════════════════
-   LOGIN MODAL — Xianxia styled
-   ═══════════════════════════════════════════════════ */
-
-function LoginModal({ onClose, onLogin }: {
+function LoginModal({
+    onClose,
+    onGoogle,
+    onDemo,
+    googleEnabled,
+    error,
+    busy,
+}: {
     onClose: () => void;
-    onLogin: (method: string, name: string) => void;
+    onGoogle: () => Promise<void>;
+    onDemo: (name: string) => void;
+    googleEnabled: boolean;
+    error: string | null;
+    busy: boolean;
 }) {
-    const [email, setEmail] = useState('');
     const [name, setName] = useState('');
-    const [step, setStep] = useState<'choose' | 'email' | 'google' | 'apple'>('choose');
 
-    const handleGoogleSubmit = () => {
-        if (name.trim()) onLogin('google', name.trim());
-    };
-
-    const handleAppleSubmit = () => {
-        if (name.trim()) onLogin('apple', name.trim());
-    };
-
-    const handleEmailSubmit = () => {
-        if (email.includes('@')) onLogin('email', email.split('@')[0]);
+    const handleDemoSubmit = () => {
+        onDemo(name);
     };
 
     return (
-        <div style={{
-            position: 'fixed', inset: 0, zIndex: 9999,
-            background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(12px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 20,
-        }} onClick={onClose}>
-            <div style={{
-                background: 'var(--scroll, rgba(18,15,25,0.95))',
-                border: '1px solid var(--border, rgba(212,168,67,0.08))',
-                borderRadius: 20, padding: 28, maxWidth: 360, width: '100%',
-                boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
-            }} onClick={(e) => e.stopPropagation()}>
-
-                {/* Header */}
-                <div style={{ textAlign: 'center', marginBottom: 24 }}>
-                    <div style={{
-                        width: 52, height: 52, borderRadius: 14,
-                        background: 'linear-gradient(135deg, #C41E3A, #D4A843)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        margin: '0 auto 12px', fontSize: 18, fontWeight: 900, color: 'white',
-                    }}>道</div>
-                    <h2 style={{ fontSize: 18, fontWeight: 700 }}>Welcome to Viral Sync</h2>
-                    <p style={{ fontSize: 13, opacity: 0.5, marginTop: 4 }}>Sign in to start earning rewards</p>
+        <div
+            style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 9999,
+                background: 'rgba(0,0,0,0.72)',
+                backdropFilter: 'blur(10px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 20,
+            }}
+            onClick={onClose}
+        >
+            <div
+                style={{
+                    background: 'var(--scroll)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 20,
+                    padding: 24,
+                    maxWidth: 400,
+                    width: '100%',
+                    boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+                }}
+                onClick={(event) => event.stopPropagation()}
+            >
+                <div style={{ textAlign: 'center', marginBottom: 18 }}>
+                    <div
+                        style={{
+                            width: 52,
+                            height: 52,
+                            borderRadius: 14,
+                            background: 'linear-gradient(135deg, var(--crimson), var(--gold))',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            margin: '0 auto 10px',
+                            color: '#fff',
+                            fontWeight: 900,
+                            fontSize: 22,
+                        }}
+                    >
+                        V
+                    </div>
+                    <h2 style={{ fontSize: 18, marginBottom: 4 }}>Sign In</h2>
+                    <p style={{ fontSize: 13, color: 'var(--text-2)' }}>
+                        Use Google for persistent identity, or continue with a demo wallet.
+                    </p>
                 </div>
 
-                {/* Choose Provider */}
-                {step === 'choose' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        <button onClick={() => setStep('google')} style={{
-                            display: 'flex', alignItems: 'center', gap: 12,
-                            padding: '14px 16px', borderRadius: 12,
-                            background: 'white', color: '#333', fontWeight: 600, fontSize: 14,
+                {googleEnabled ? (
+                    <button
+                        onClick={() => { void onGoogle(); }}
+                        disabled={busy}
+                        style={{
                             width: '100%',
-                        }}>
-                            <svg width="18" height="18" viewBox="0 0 18 18"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" /><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853" /><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05" /><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335" /></svg>
-                            Continue with Google
-                        </button>
-                        <button onClick={() => setStep('apple')} style={{
-                            display: 'flex', alignItems: 'center', gap: 12,
-                            padding: '14px 16px', borderRadius: 12,
-                            background: '#000', color: '#fff', fontWeight: 600, fontSize: 14,
-                            width: '100%',
-                        }}>
-                            <span style={{ fontSize: 18 }}>🍎</span> Continue with Apple
-                        </button>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, opacity: 0.3, margin: '4px 0' }}>
-                            <div style={{ flex: 1, height: 1, background: 'currentColor' }} />
-                            <span style={{ fontSize: 12 }}>or</span>
-                            <div style={{ flex: 1, height: 1, background: 'currentColor' }} />
-                        </div>
-                        <button onClick={() => setStep('email')} style={{
-                            padding: '14px 16px', borderRadius: 12,
-                            background: 'rgba(255,255,255,0.06)', fontWeight: 600, fontSize: 14,
-                            width: '100%',
-                        }}>✉️ Continue with Email</button>
+                            padding: '12px 14px',
+                            borderRadius: 12,
+                            background: 'linear-gradient(135deg, #ffffff, #ececec)',
+                            color: '#222',
+                            fontWeight: 700,
+                            marginBottom: 14,
+                            opacity: busy ? 0.6 : 1,
+                        }}
+                    >
+                        {busy ? 'Opening Google Sign-In...' : 'Continue with Google'}
+                    </button>
+                ) : (
+                    <div
+                        style={{
+                            marginBottom: 14,
+                            fontSize: 12,
+                            color: 'var(--text-3)',
+                            background: 'var(--mist)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 10,
+                            padding: '8px 10px',
+                        }}
+                    >
+                        Google sign-in is disabled until Firebase env vars are configured.
                     </div>
                 )}
 
-                {/* Google → Name Entry */}
-                {step === 'google' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        <p style={{ fontSize: 13, opacity: 0.6 }}>Enter your name to continue with Google:</p>
-                        <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-                            placeholder="Your name" autoFocus
-                            style={{
-                                padding: '12px 14px', borderRadius: 8,
-                                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(212,168,67,0.08)',
-                                color: '#E8E4D9', fontSize: 14, outline: 'none', width: '100%',
-                            }}
-                            onFocus={(e) => e.target.style.borderColor = 'rgba(212,168,67,0.25)'}
-                            onBlur={(e) => e.target.style.borderColor = 'rgba(212,168,67,0.08)'}
-                            onKeyDown={(e) => e.key === 'Enter' && handleGoogleSubmit()}
-                        />
-                        <button onClick={handleGoogleSubmit} disabled={!name.trim()} style={{
-                            padding: '14px 16px', borderRadius: 12, width: '100%',
-                            background: name.trim() ? 'linear-gradient(135deg, #D4A843, #E07A5F)' : 'rgba(255,255,255,0.06)',
-                            color: name.trim() ? '#0B0A12' : 'rgba(255,255,255,0.3)',
-                            fontWeight: 700, fontSize: 14,
-                        }}>Sign In with Google</button>
-                        <button onClick={() => { setStep('choose'); setName(''); }} style={{ padding: 8, fontSize: 13, opacity: 0.4 }}>← Back</button>
-                    </div>
-                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
+                    <input
+                        type="text"
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                        placeholder="Demo name"
+                        style={{
+                            padding: '12px 14px',
+                            borderRadius: 10,
+                            background: 'var(--mist)',
+                            border: '1px solid var(--border)',
+                            color: 'var(--text-1)',
+                            outline: 'none',
+                        }}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                                handleDemoSubmit();
+                            }
+                        }}
+                    />
+                    <button
+                        onClick={handleDemoSubmit}
+                        disabled={!name.trim() || busy}
+                        style={{
+                            padding: '12px 14px',
+                            borderRadius: 10,
+                            fontWeight: 700,
+                            background: name.trim() && !busy ? 'linear-gradient(135deg, var(--gold), var(--dawn))' : 'var(--mist)',
+                            color: name.trim() && !busy ? 'var(--ink)' : 'var(--text-3)',
+                        }}
+                    >
+                        Demo
+                    </button>
+                </div>
 
-                {/* Apple → Name Entry */}
-                {step === 'apple' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        <p style={{ fontSize: 13, opacity: 0.6 }}>Enter your name to continue with Apple:</p>
-                        <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-                            placeholder="Your name" autoFocus
-                            style={{
-                                padding: '12px 14px', borderRadius: 8,
-                                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(212,168,67,0.08)',
-                                color: '#E8E4D9', fontSize: 14, outline: 'none', width: '100%',
-                            }}
-                            onFocus={(e) => e.target.style.borderColor = 'rgba(212,168,67,0.25)'}
-                            onBlur={(e) => e.target.style.borderColor = 'rgba(212,168,67,0.08)'}
-                            onKeyDown={(e) => e.key === 'Enter' && handleAppleSubmit()}
-                        />
-                        <button onClick={handleAppleSubmit} disabled={!name.trim()} style={{
-                            padding: '14px 16px', borderRadius: 12, width: '100%',
-                            background: name.trim() ? '#000' : 'rgba(255,255,255,0.06)',
-                            color: name.trim() ? '#fff' : 'rgba(255,255,255,0.3)',
-                            fontWeight: 700, fontSize: 14, border: name.trim() ? '1px solid #333' : 'none',
-                        }}>Sign In with Apple</button>
-                        <button onClick={() => { setStep('choose'); setName(''); }} style={{ padding: 8, fontSize: 13, opacity: 0.4 }}>← Back</button>
-                    </div>
-                )}
-
-                {/* Email */}
-                {step === 'email' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                            placeholder="you@example.com" autoFocus
-                            style={{
-                                padding: '12px 14px', borderRadius: 8,
-                                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(212,168,67,0.08)',
-                                color: '#E8E4D9', fontSize: 14, outline: 'none', width: '100%',
-                            }}
-                            onFocus={(e) => e.target.style.borderColor = 'rgba(212,168,67,0.25)'}
-                            onBlur={(e) => e.target.style.borderColor = 'rgba(212,168,67,0.08)'}
-                            onKeyDown={(e) => e.key === 'Enter' && handleEmailSubmit()}
-                        />
-                        <button onClick={handleEmailSubmit} disabled={!email.includes('@')} style={{
-                            padding: '14px 16px', borderRadius: 12, width: '100%',
-                            background: email.includes('@') ? 'linear-gradient(135deg, #D4A843, #E07A5F)' : 'rgba(255,255,255,0.06)',
-                            color: email.includes('@') ? '#0B0A12' : 'rgba(255,255,255,0.3)',
-                            fontWeight: 700, fontSize: 14,
-                        }}>Continue with Email</button>
-                        <button onClick={() => { setStep('choose'); setEmail(''); }} style={{ padding: 8, fontSize: 13, opacity: 0.4 }}>← Back</button>
+                {error && (
+                    <div style={{ marginTop: 12, fontSize: 12, color: 'var(--crimson)' }}>
+                        {error}
                     </div>
                 )}
             </div>

@@ -15,7 +15,7 @@ interface OracleMetricsProps {
 }
 
 /**
- * Merchant Dashboard V1 Component.
+ * Merchant dashboard metrics component.
  * Maps the securely ingested Helius-backed indexing data processed by `compute_viral_oracle`.
  */
 export const OracleMetrics: React.FC<OracleMetricsProps> = ({ data, isLoading }) => {

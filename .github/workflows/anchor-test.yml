@@ -1,4 +1,4 @@
-name: Anchor Test V4 Pipeline
+name: Anchor Test Pipeline
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 jobs:
   anchor-test:
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v3
 
@@ -35,7 +35,14 @@ jobs:
       if: steps.solana-cache.outputs.cache-hit != 'true'
       run: |
         sh -c "$(curl -sSfL https://release.solana.com/v1.18.23/install)"
-        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+    - name: Add Solana to PATH
+      run: echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+    - name: Create Local Test Wallet
+      run: |
+        mkdir -p "$HOME/.config/solana"
+        solana-keygen new --no-bip39-passphrase --silent -o "$HOME/.config/solana/id.json"
 
     - name: Install AVM & Anchor
       run: |
@@ -43,8 +50,12 @@ jobs:
         avm install 0.30.1
         avm use 0.30.1
 
-    - name: Install Dependencies
-      run: yarn install
+    - name: Install JS Dependencies
+      run: |
+        npm ci --prefix app
+        npm ci --prefix relayer
+        npm ci --prefix cranks
+        npm ci --prefix server/actions
 
     - name: Copy target Keys if mapped
       run: |
@@ -52,7 +63,24 @@ jobs:
         # echo "${{ secrets.DEPLOY_KEY }}" > ./deploy.json
 
     - name: Run Cargo Check
-      run: cargo check --manifest-path programs/viral_sync/Cargo.toml
+      run: cargo check --workspace
+
+    - name: Run Cargo Test
+      run: cargo test --workspace
+
+    - name: Run Cargo Clippy
+      run: cargo clippy --workspace --all-targets -- -D warnings
+
+    - name: Run App Lint and Build
+      run: |
+        npm run lint --prefix app
+        npm run build --prefix app
+
+    - name: Run Service Builds
+      run: |
+        npm run build --prefix relayer
+        npm run build --prefix cranks
+        npm run build --prefix server/actions
 
     - name: Run Anchor Test
       run: anchor test

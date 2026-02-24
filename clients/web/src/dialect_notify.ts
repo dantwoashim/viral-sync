@@ -1,7 +1,7 @@
 import { Dialect, Environment, DialectCloudEnvironment } from '@dialectlabs/sdk';
 import { PublicKey } from '@solana/web3.js';
 
-// V4 Architecture integrates Dialect for instantaneous PWA push-notifications 
+// Integrates Dialect for near real-time PWA push notifications
 // immediately upon Helius webhooks processing a TransferHook transfer
 
 export class DialectNotificationBridge {

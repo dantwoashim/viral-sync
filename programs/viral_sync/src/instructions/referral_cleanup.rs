@@ -31,7 +31,7 @@ pub fn close_expired_referral(ctx: Context<CloseExpiredReferral>) -> Result<()> 
     // We only allow closing if all commissions have been paid out properly to prevent griefing
     require!(
         referral.commission_earned == referral.commission_settled, 
-        ViralSyncError::MathOverflow // (Map custom error for OutstandingCommissionUnsettled in full deployment)
+        ViralSyncError::AccessDenied
     );
     
     let rent_lamports = referral.to_account_info().lamports();

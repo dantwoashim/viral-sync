@@ -8,7 +8,7 @@ interface RedemptionScannerProps {
 
 /**
  * Point of Sale (POS) component engineered for iPads at retail registers.
- * Connects the V4 Architecture's requirement for physical presence to unlock
+ * Enforces physical-presence verification to unlock
  * loyalty tokens. Merges NFC payloads with the user's Session Keys.
  */
 export const RedemptionScanner: React.FC<RedemptionScannerProps> = ({ merchantVaultAuth, storeLocation }) => {
@@ -27,7 +27,7 @@ export const RedemptionScanner: React.FC<RedemptionScannerProps> = ({ merchantVa
             setScanStatus('verifying');
 
             // 2. Once the Consumer's payload is detected, the POS software locally 
-            // generates the `redeem_with_geo` payload using the utility built in Week 5
+            // generates the `redeem_with_geo` payload using the local signer utility
             console.log(`Generating Geolocation bounds: ${storeLocation.latMicro}, ${storeLocation.lngMicro}`);
 
             // 3. The transaction is formulated, embedding the POS-signed geography variables,
@@ -104,7 +104,7 @@ export const RedemptionScanner: React.FC<RedemptionScannerProps> = ({ merchantVa
 
             {/* Footer Store Info */}
             <div className="absolute bottom-4 left-0 w-full text-center text-xs text-slate-400 font-mono">
-                LOC: [{storeLocation.latMicro}, {storeLocation.lngMicro}] • V4 SECURE
+                LOC: [{storeLocation.latMicro}, {storeLocation.lngMicro}] • SECURE MODE
             </div>
         </div>
     );

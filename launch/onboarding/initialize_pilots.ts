@@ -20,7 +20,7 @@ const PILOTS = [
 ];
 
 async function initializePilotMerchants() {
-    console.log(`[V4 PRODUCTION ONBOARDING] Initializing ${PILOTS.length} Pilot Merchants...`);
+    console.log(`[PRODUCTION ONBOARDING] Initializing ${PILOTS.length} Pilot Merchants...`);
     console.log(`Deployer Authority: ${deployerKeypair.publicKey.toBase58()}`);
 
     for (const merchant of PILOTS) {
@@ -56,7 +56,7 @@ async function initializePilotMerchants() {
         }
     }
 
-    console.log(`\n[V4 PRODUCTION] All pilot onboardings configured successfully.`);
+    console.log(`\n[PRODUCTION] All pilot onboardings configured successfully.`);
 }
 
 initializePilotMerchants();

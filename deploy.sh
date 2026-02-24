@@ -1,6 +1,6 @@
 #!/bin/bash
-# VIRAL-SYNC V4 Deployment Shell Script
-# Ensures build, key synchronization, and standard deployment rules are applied.
+# Viral Sync deployment script
+# Ensures build, key synchronization, and standard deployment checks are applied.
 
 set -e
 
@@ -8,7 +8,7 @@ ENV=${1:-devnet}
 CLUSTER_URL="https://api.$ENV.solana.com"
 
 echo "================================================="
-echo " Deploying VIRAL-SYNC V4 to $ENV"
+echo " Deploying Viral Sync to $ENV"
 echo "================================================="
 
 echo "1. Running clean build..."
@@ -25,7 +25,7 @@ echo "4. Running backend rust validation..."
 cargo check --manifest-path programs/viral_sync/Cargo.toml
 
 echo "5. Deploying to $CLUSTER_URL..."
-# V4 requires the deployer to retain upgrade authority per the roadmap until audits are finalized
+# Keep upgrade authority with the deployer until audit requirements are satisfied.
 solana program deploy \
   --url $CLUSTER_URL \
   --program-id target/deploy/viral_sync-keypair.json \

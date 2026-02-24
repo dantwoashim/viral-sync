@@ -1,4 +1,4 @@
-# Viral Sync — Merchant Guide
+# Viral Sync - Merchant Guide
 
 > **Turn your customers into your marketing team.**
 > Launch a referral program in 5 minutes. No developers needed. No crypto expertise required.

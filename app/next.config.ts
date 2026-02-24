@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // output: 'export', // Uncomment for APK builds
+  output: 'export',
   // Next.js 16 uses Turbopack by default.
   // Privy Solana externals are handled at runtime, not build-time.
   turbopack: {},

@@ -8,7 +8,7 @@ interface BlinkGeneratorProps {
 }
 
 /**
- * Consumer Dashboard component mapping V4 Architecture.
+ * Consumer dashboard component for generating shareable Solana Action links.
  * Converts the user's active Generation PDA and Mint into an encoded 
  * Solana Action `solana-action:` URL strictly purposed for Twitter/X sharing.
  */

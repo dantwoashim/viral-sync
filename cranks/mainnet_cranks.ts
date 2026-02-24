@@ -1,9 +1,6 @@
-import { Connection, Keypair, PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
-import * as anchor from '@coral-xyz/anchor';
+import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
 import bs58 from 'bs58';
 import dotenv from 'dotenv';
-// Mock import of IDL mappings
-import { ViralSync } from '../target/types/viral_sync';
 
 dotenv.config();
 

@@ -1,7 +1,7 @@
 import { PrivyClient } from '@privy-io/react-auth';
 import { Connection, Transaction, VersionedTransaction } from '@solana/web3.js';
 
-// V4 Architecture requires zero seed phrases for end-users.
+// This flow keeps seed phrases hidden from end-users.
 // This mock module abstracts the `@privy-io/react-auth` integration logic.
 
 export class PrivyAuthBridge {
@@ -28,7 +28,7 @@ export class PrivyAuthBridge {
 
     /**
      * Prompts the embedded Privy wallet to sign a transaction without showing 
-     * confusing web3 popups if the UI configuration is set to seamless.
+     * confusing web3 popups if the UI configuration skips confirmations.
      */
     async signTransaction(userId: string, tx: Transaction | VersionedTransaction): Promise<any> {
         // const provider = await this.privy.getSolanaProvider(userId);
