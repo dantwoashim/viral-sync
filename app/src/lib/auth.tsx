@@ -67,6 +67,7 @@ type InitialSessionState = {
 };
 
 type GoogleAuthFlow = 'popup-first' | 'redirect-first';
+const NATIVE_AUTH_TIMEOUT_MS = 15000;
 
 const defaultAuth: AuthState = {
     loading: false,
@@ -273,6 +274,27 @@ function humanizeAuthError(error: unknown): string {
     return message || 'Authentication failed. Please try again.';
 }
 
+function nativeAuthTimeoutError(): Error {
+    return new Error('Google sign-in did not open. Verify Google Play Services and Firebase OAuth setup, then retry.');
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    try {
+        return await Promise.race<T>([
+            promise,
+            new Promise<T>((_, reject) => {
+                timeout = setTimeout(() => reject(nativeAuthTimeoutError()), timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timeout) {
+            clearTimeout(timeout);
+        }
+    }
+}
+
 function shouldRetryGoogleWithClassicSignIn(error: unknown): boolean {
     const code = (error as { code?: string })?.code?.toLowerCase() || '';
     const message = (error as { message?: string })?.message?.toLowerCase() || '';
@@ -422,13 +444,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (Capacitor.isNativePlatform()) {
-                void FirebaseAuthentication.getCurrentUser()
+                void FirebaseAuthentication.getPendingAuthResult()
                     .then((result) => {
                         if (!mounted) {
                             return;
                         }
 
                         if (result.user) {
+                            applyNativeUserToState(
+                                result.user,
+                                roleFromStorage,
+                                setAuthenticated,
+                                setWalletAddress,
+                                setDisplayName,
+                                setLoginMethod,
+                            );
+                            setAuthError(null);
+                            setShowModal(false);
+                            setLoading(false);
+                            setAuthBusy(false);
+                            return;
+                        }
+
+                        return FirebaseAuthentication.getCurrentUser();
+                    })
+                    .then((result) => {
+                        if (!mounted) {
+                            return;
+                        }
+
+                        if (result?.user) {
                             applyNativeUserToState(
                                 result.user,
                                 roleFromStorage,
@@ -505,20 +550,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         setAuthError(null);
-        setShowModal(false);
+        setShowModal(true);
         setAuthBusy(true);
 
         if (Capacitor.isNativePlatform()) {
+            if (!Capacitor.isPluginAvailable('FirebaseAuthentication')) {
+                setAuthError('Native Google sign-in plugin is unavailable in this APK. Reinstall the latest build.');
+                setAuthBusy(false);
+                return;
+            }
+
             try {
                 let nativeResult: NativeSignInResult;
 
                 try {
-                    nativeResult = await FirebaseAuthentication.signInWithGoogle();
+                    nativeResult = await withTimeout(
+                        FirebaseAuthentication.signInWithGoogle(),
+                        NATIVE_AUTH_TIMEOUT_MS,
+                    );
                 } catch (error) {
                     if (Capacitor.getPlatform() !== 'android' || !shouldRetryGoogleWithClassicSignIn(error)) {
                         throw error;
                     }
-                    nativeResult = await FirebaseAuthentication.signInWithGoogle({ useCredentialManager: false });
+                    nativeResult = await withTimeout(
+                        FirebaseAuthentication.signInWithGoogle({ useCredentialManager: false }),
+                        NATIVE_AUTH_TIMEOUT_MS,
+                    );
                 }
 
                 const roleFromStorage = readStoredRole();
@@ -936,6 +993,12 @@ function LoginModal({
                         }}
                     >
                         OAuth sign-in is disabled until Firebase env vars are configured.
+                    </div>
+                )}
+
+                {busy && (
+                    <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--text-2)' }}>
+                        Waiting for Google sign-in...
                     </div>
                 )}
 
