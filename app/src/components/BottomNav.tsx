@@ -24,18 +24,21 @@ const consumerTabs = [
 
 export default function BottomNav() {
     const pathname = useClientPathname();
-    const { role } = useAuth();
+    const { authenticated, role } = useAuth();
 
-    if (!pathname || pathname === '/login' || pathname.startsWith('/pos')) {
+    if (!authenticated || !pathname || pathname === '/login' || pathname.startsWith('/pos')) {
         return null;
     }
 
     const activeRole = role ?? (pathname.startsWith('/consumer') ? 'consumer' : 'merchant');
     const tabs = activeRole === 'consumer' ? consumerTabs : merchantTabs;
+    const normalizedPath = pathname === '/index.html' ? '/' : pathname;
 
     const isActive = (href: string) => {
-        if (href === '/' || href === '/consumer') return pathname === href;
-        return pathname.startsWith(href);
+        if (href === '/' || href === '/consumer') {
+            return normalizedPath === href || normalizedPath === `${href}/`;
+        }
+        return normalizedPath === href || normalizedPath.startsWith(`${href}/`);
     };
 
     return (

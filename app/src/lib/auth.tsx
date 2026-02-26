@@ -26,6 +26,7 @@ import {
 } from 'firebase/auth';
 import {
     FirebaseAuthentication,
+    type SignInResult as NativeSignInResult,
     type User as NativeFirebaseUser,
 } from '@capacitor-firebase/authentication';
 import { getFirebaseAuth } from './firebase';
@@ -210,9 +211,12 @@ function detectLoginMethod(user: FirebaseUser): AuthState['loginMethod'] {
 }
 
 function detectNativeLoginMethod(user: NativeFirebaseUser): AuthState['loginMethod'] {
+    const providerData = Array.isArray((user as { providerData?: unknown[] }).providerData)
+        ? ((user as { providerData: Array<{ providerId?: string | null }> }).providerData ?? [])
+        : [];
     const providerIds = [
         user.providerId,
-        ...user.providerData.map((entry) => entry.providerId),
+        ...providerData.map((entry) => entry.providerId),
     ].filter((providerId): providerId is string => Boolean(providerId));
 
     if (providerIds.includes('apple.com')) {
@@ -267,6 +271,21 @@ function humanizeAuthError(error: unknown): string {
     }
 
     return message || 'Authentication failed. Please try again.';
+}
+
+function shouldRetryGoogleWithClassicSignIn(error: unknown): boolean {
+    const code = (error as { code?: string })?.code?.toLowerCase() || '';
+    const message = (error as { message?: string })?.message?.toLowerCase() || '';
+
+    return (
+        code.includes('developer_error')
+        || code.includes('sign_in_failed')
+        || code.includes('invalid-account')
+        || message.includes('developer error')
+        || message.includes('credential manager')
+        || message.includes('12500')
+        || message.includes('10:')
+    );
 }
 
 function applyFirebaseUserToState(
@@ -491,11 +510,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (Capacitor.isNativePlatform()) {
             try {
-                const nativeResult = await FirebaseAuthentication.signInWithGoogle();
+                let nativeResult: NativeSignInResult;
+
+                try {
+                    nativeResult = await FirebaseAuthentication.signInWithGoogle();
+                } catch (error) {
+                    if (Capacitor.getPlatform() !== 'android' || !shouldRetryGoogleWithClassicSignIn(error)) {
+                        throw error;
+                    }
+                    nativeResult = await FirebaseAuthentication.signInWithGoogle({ useCredentialManager: false });
+                }
+
                 const roleFromStorage = readStoredRole();
-                const nativeUser = nativeResult.user ?? null;
-                const idToken = nativeResult.credential?.idToken;
-                const accessToken = nativeResult.credential?.accessToken;
+                let nativeUser = nativeResult.user ?? null;
+                let idToken = nativeResult.credential?.idToken ?? null;
+                let accessToken = nativeResult.credential?.accessToken ?? null;
+
+                if (!nativeUser) {
+                    try {
+                        const currentUser = await FirebaseAuthentication.getCurrentUser();
+                        nativeUser = currentUser.user ?? null;
+                    } catch {
+                        // Ignore and continue with available data.
+                    }
+                }
+
+                if (Capacitor.getPlatform() === 'android') {
+                    try {
+                        const pendingResult = await FirebaseAuthentication.getPendingAuthResult();
+                        nativeUser = nativeUser ?? pendingResult.user ?? null;
+                        idToken = idToken ?? pendingResult.credential?.idToken ?? null;
+                        accessToken = accessToken ?? pendingResult.credential?.accessToken ?? null;
+                    } catch {
+                        // No pending result is expected in most sign-in flows.
+                    }
+                }
 
                 if (nativeUser) {
                     applyNativeUserToState(
@@ -506,6 +555,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         setDisplayName,
                         setLoginMethod,
                     );
+                }
+
+                if (!idToken && nativeUser) {
+                    try {
+                        const tokenResult = await FirebaseAuthentication.getIdToken();
+                        idToken = tokenResult.token ?? null;
+                    } catch {
+                        // If token fetch fails, native session is still valid for app-level auth.
+                    }
                 }
 
                 if (idToken) {

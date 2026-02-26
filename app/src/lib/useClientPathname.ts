@@ -14,6 +14,24 @@ function dispatchPathEvent() {
     window.dispatchEvent(new Event(PATH_EVENT));
 }
 
+function normalizePathname(pathname: string): string {
+    let value = pathname || '/';
+
+    if (value.endsWith('/index.html')) {
+        value = value.slice(0, -'/index.html'.length) || '/';
+    }
+
+    if (!value.startsWith('/')) {
+        value = `/${value}`;
+    }
+
+    if (value.length > 1 && value.endsWith('/')) {
+        value = value.slice(0, -1);
+    }
+
+    return value || '/';
+}
+
 function patchHistoryEvents() {
     if (typeof window === 'undefined' || window.__vsPathPatched) {
         return;
@@ -40,7 +58,7 @@ export function useClientPathname(): string | null {
         if (typeof window === 'undefined') {
             return null;
         }
-        return window.location.pathname || '/';
+        return normalizePathname(window.location.pathname || '/');
     });
 
     useEffect(() => {
@@ -50,7 +68,7 @@ export function useClientPathname(): string | null {
 
         patchHistoryEvents();
 
-        const update = () => setPathname(window.location.pathname || '/');
+        const update = () => setPathname(normalizePathname(window.location.pathname || '/'));
         update();
 
         window.addEventListener(PATH_EVENT, update);

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import BottomNav from '@/components/BottomNav';
 import Sidebar from '@/components/Sidebar';
 import { useAuth } from '@/lib/auth';
@@ -8,18 +9,28 @@ import { useClientPathname } from '@/lib/useClientPathname';
 
 export default function MerchantShell({ children }: { children: React.ReactNode }) {
     const pathname = useClientPathname();
-    const { role, setRole } = useAuth();
+    const router = useRouter();
+    const { authenticated, loading, role, setRole } = useAuth();
     const hideNav = !pathname || pathname === '/login' || pathname.startsWith('/pos');
-    const inferredRole = hideNav ? null : (pathname.startsWith('/consumer') ? 'consumer' : 'merchant');
+    const inferredRole = hideNav || !authenticated ? null : (pathname.startsWith('/consumer') ? 'consumer' : 'merchant');
     const activeRole = role ?? inferredRole;
-    const showNavigation = !hideNav && activeRole !== null;
+    const showNavigation = authenticated && !hideNav && activeRole !== null;
     const showSidebar = showNavigation && activeRole === 'merchant';
 
     useEffect(() => {
-        if (!role && inferredRole) {
+        if (authenticated && !role && inferredRole) {
             setRole(inferredRole);
         }
-    }, [role, inferredRole, setRole]);
+    }, [authenticated, role, inferredRole, setRole]);
+
+    useEffect(() => {
+        if (loading || !pathname) {
+            return;
+        }
+        if (!authenticated && pathname !== '/login') {
+            router.replace('/login');
+        }
+    }, [authenticated, loading, pathname, router]);
 
     return (
         <div className={`shell-layout ${showSidebar ? 'with-sidebar' : ''}`}>

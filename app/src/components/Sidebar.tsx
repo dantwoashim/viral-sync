@@ -49,7 +49,7 @@ export default function Sidebar() {
                     <Link
                         key={item.href}
                         href={item.href}
-                        className={`sidebar-item ${pathname === item.href ? 'active' : ''}`}
+                        className={`sidebar-item ${pathname === item.href || pathname === `${item.href}/` ? 'active' : ''}`}
                     >
                         <item.icon size={20} />
                         <span>{item.label}</span>
