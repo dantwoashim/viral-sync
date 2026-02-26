@@ -67,7 +67,7 @@ type InitialSessionState = {
 };
 
 type GoogleAuthFlow = 'popup-first' | 'redirect-first';
-const NATIVE_AUTH_TIMEOUT_MS = 15000;
+const NATIVE_AUTH_TIMEOUT_MS = 20000;
 
 const defaultAuth: AuthState = {
     loading: false,
@@ -293,21 +293,6 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
             clearTimeout(timeout);
         }
     }
-}
-
-function shouldRetryGoogleWithClassicSignIn(error: unknown): boolean {
-    const code = (error as { code?: string })?.code?.toLowerCase() || '';
-    const message = (error as { message?: string })?.message?.toLowerCase() || '';
-
-    return (
-        code.includes('developer_error')
-        || code.includes('sign_in_failed')
-        || code.includes('invalid-account')
-        || message.includes('developer error')
-        || message.includes('credential manager')
-        || message.includes('12500')
-        || message.includes('10:')
-    );
 }
 
 function applyFirebaseUserToState(
@@ -568,14 +553,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         FirebaseAuthentication.signInWithGoogle(),
                         NATIVE_AUTH_TIMEOUT_MS,
                     );
-                } catch (error) {
-                    if (Capacitor.getPlatform() !== 'android' || !shouldRetryGoogleWithClassicSignIn(error)) {
-                        throw error;
+                } catch (primaryError) {
+                    if (Capacitor.getPlatform() !== 'android') {
+                        throw primaryError;
                     }
-                    nativeResult = await withTimeout(
-                        FirebaseAuthentication.signInWithGoogle({ useCredentialManager: false }),
-                        NATIVE_AUTH_TIMEOUT_MS,
-                    );
+                    try {
+                        nativeResult = await withTimeout(
+                            FirebaseAuthentication.signInWithGoogle({ useCredentialManager: false }),
+                            NATIVE_AUTH_TIMEOUT_MS,
+                        );
+                    } catch (fallbackError) {
+                        throw fallbackError ?? primaryError;
+                    }
                 }
 
                 const roleFromStorage = readStoredRole();
