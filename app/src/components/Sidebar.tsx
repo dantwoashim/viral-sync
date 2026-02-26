@@ -2,10 +2,10 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { useTheme } from '@/app/providers';
 import { useAuth } from '@/lib/auth';
 import { useWallet } from '@/lib/useWallet';
+import { useClientPathname } from '@/lib/useClientPathname';
 import { shortenAddress } from '@/lib/solana';
 import {
     BarChart3,
@@ -27,7 +27,7 @@ const merchantNav = [
 ];
 
 export default function Sidebar() {
-    const pathname = usePathname();
+    const pathname = useClientPathname();
     const { theme, toggleTheme } = useTheme();
     const { displayName } = useAuth();
     const wallet = useWallet();

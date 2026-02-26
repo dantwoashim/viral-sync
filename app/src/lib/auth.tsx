@@ -492,14 +492,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (Capacitor.isNativePlatform()) {
             try {
                 const nativeResult = await FirebaseAuthentication.signInWithGoogle();
+                const roleFromStorage = readStoredRole();
+                const nativeUser = nativeResult.user ?? null;
                 const idToken = nativeResult.credential?.idToken;
                 const accessToken = nativeResult.credential?.accessToken;
 
+                if (nativeUser) {
+                    applyNativeUserToState(
+                        nativeUser,
+                        roleFromStorage,
+                        setAuthenticated,
+                        setWalletAddress,
+                        setDisplayName,
+                        setLoginMethod,
+                    );
+                }
+
                 if (idToken) {
-                    const credential = GoogleAuthProvider.credential(idToken, accessToken);
-                    await signInWithCredential(firebaseAuth, credential);
-                } else {
-                    throw new Error('Google sign-in returned no ID token.');
+                    try {
+                        const credential = GoogleAuthProvider.credential(idToken, accessToken);
+                        await signInWithCredential(firebaseAuth, credential);
+                    } catch {
+                        // Native auth succeeded; Firebase JS credential exchange is best-effort.
+                    }
+                } else if (!nativeUser) {
+                    throw new Error('Google sign-in returned no authenticated user.');
                 }
 
                 setAuthError(null);

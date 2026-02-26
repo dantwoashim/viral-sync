@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Share2, Copy, Zap, Send } from 'lucide-react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useWallet } from '@/lib/useWallet';
 import { useCommissionLedger } from '@/lib/hooks';
 import { formatTokenAmount, MERCHANT_PUBKEY, shortenAddress } from '@/lib/solana';
@@ -14,15 +14,21 @@ function isValidReferrer(value: string | null): value is string {
 }
 
 function EarnPageContent() {
-    const searchParams = useSearchParams();
     const router = useRouter();
     const publicKey = useWallet();
     const ledger = useCommissionLedger(publicKey, null);
     const dataError = ledger.error;
     const [copied, setCopied] = React.useState(false);
     const [shared, setShared] = React.useState(false);
+    const [refFromQuery, setRefFromQuery] = React.useState<string | null>(null);
 
-    const refFromQuery = searchParams.get('ref');
+    React.useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+        const params = new URLSearchParams(window.location.search);
+        setRefFromQuery(params.get('ref'));
+    }, []);
 
     React.useEffect(() => {
         if (!isValidReferrer(refFromQuery)) return;

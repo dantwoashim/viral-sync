@@ -2,8 +2,8 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
+import { useClientPathname } from '@/lib/useClientPathname';
 import { BarChart3, Rocket, Scan, Wallet, Settings, Share2, User, Gift } from 'lucide-react';
 
 const merchantTabs = [
@@ -23,10 +23,10 @@ const consumerTabs = [
 ];
 
 export default function BottomNav() {
-    const pathname = usePathname();
+    const pathname = useClientPathname();
     const { role } = useAuth();
 
-    if (pathname === '/login' || pathname.startsWith('/pos')) {
+    if (!pathname || pathname === '/login' || pathname.startsWith('/pos')) {
         return null;
     }
 
